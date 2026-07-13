@@ -71,6 +71,7 @@ export function killPawn(s: SimState, idx: number, cause: string, causeEventIds:
   if (!(p.flags[idx] & PawnFlag.Alive)) return;
   p.flags[idx] = 0;
   s.alivePawns--;
+  s.deathsByCause[cause] = (s.deathsByCause[cause] ?? 0) + 1;
   // unpair partner
   const partner = p.pairId[idx];
   if (partner >= 0 && p.pairId[partner] === idx) p.pairId[partner] = -1;

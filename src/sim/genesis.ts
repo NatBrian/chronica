@@ -36,7 +36,7 @@ export function genesis(seed: number, config: WorldConfig): SimState {
       extinct: false,
       reserveStores: false,
       conscriptTarget: 0,
-      foodSignalAvg: 1100,
+      foodSignalAvg: 22000,
       capital: f,
       vassalOf: -1,
       prospectEffort: 0,
@@ -52,8 +52,8 @@ export function genesis(seed: number, config: WorldConfig): SimState {
       buildings: [], farmPlots: [],
       founded: 0, razed: false,
       granaryCap: 4000, popCache: 0, moodAvg: 150, crowding: 0,
-      foodPerCapitaAvg: 1100, lodStatistical: false,
-      resourceTiles: { forage: [], hunt: [], fish: [], wood: [], mine: [] },
+      foodPerCapitaAvg: 22000, foodFlowAvg: 0, lastFoodStock: 3100, lodStatistical: false,
+      resourceTiles: { forage: [], hunt: [], fish: [], wood: [], mine: [], stone: [] },
     };
     settlement.stockpile[Good.Grain] = 2600;
     settlement.stockpile[Good.Meat] = 500;

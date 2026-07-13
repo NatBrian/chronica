@@ -73,6 +73,7 @@ export class Sim {
 
   private pushKeyframe(): void {
     const packed = packSnapshot(snapshot(this.state));
+    this.keyframes = this.keyframes.filter(k => k.tick !== this.state.tick);
     this.keyframes.push({ tick: this.state.tick, packed });
     // F3 quota thinning: beyond 100y ago keep every 50y only
     const cutoff = this.state.tick - 100 * TICKS_PER_YEAR;

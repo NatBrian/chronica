@@ -1,8 +1,12 @@
 // System 6 — 3-layer action selection (03): reflexes → utility over advertised
 // offers (IAUS curves, commitment, staggered 1/8) → idle.
-import { ActionId, Good } from '../../shared/types';
-import { PawnFlag, SimState, Settlement } from '../state';
+import { ActionId, BuildingKind, EventType, Good, Season } from '../../shared/types';
+import { PawnFlag, SimState, Settlement, effFood } from '../state';
 import { TileFlag } from '../world/map';
+import { planSettlement } from '../settlementOps';
+import { getField, fieldDist } from '../world/flowField';
+import { emitEvent, yearOf } from '../events/events';
+import { seasonOf } from './calendarSystem';
 
 // ---- Response curves (integer data tables, 03) ----
 export function hungerCurve(h: number): number {
@@ -26,27 +30,41 @@ function socialCurve(v: number): number {
 export function refreshResourceTiles(s: SimState, st: Settlement): void {
   const N = s.map.size;
   const R = 15;
-  const found: { forage: [number, number][]; hunt: [number, number][]; fish: [number, number][]; wood: [number, number][]; mine: [number, number][] } =
-    { forage: [], hunt: [], fish: [], wood: [], mine: [] };
+  const field = getField(s, st);
+  const found: Record<'forage' | 'hunt' | 'fish' | 'wood' | 'mine' | 'stone', [number, number][]> =
+    { forage: [], hunt: [], fish: [], wood: [], mine: [], stone: [] };
   for (let dy = -R; dy <= R; dy++) {
     for (let dx = -R; dx <= R; dx++) {
       const x = st.x + dx, y = st.y + dy;
       if (x < 0 || y < 0 || x >= N || y >= N) continue;
+      if (fieldDist(field, x, y) === 65535) continue;   // unreachable — never advertise
       const i = y * N + x;
       const fert = s.map.fertility[i];
-      if (fert > 90 && !(s.map.flags[i] & TileFlag.Farm)) found.forage.push([fert, i]);
+      if (fert > 75 && !(s.map.flags[i] & TileFlag.Farm)) found.forage.push([fert, i]);
       if (s.map.game[i] > 50) found.hunt.push([s.map.game[i], i]);
       if (s.map.fish[i] > 70) found.fish.push([s.map.fish[i], i]);
       if (s.map.forest[i] > 90) found.wood.push([s.map.forest[i], i]);
       if (s.map.ore[i] > 0) found.mine.push([s.map.ore[i], i]);
+      else {
+        const b = s.map.biome[i];
+        if (b === 7 /* Hills */) found.stone.push([s.map.elevation[i], i]);
+      }
     }
   }
   const top = (arr: [number, number][]) =>
     arr.sort((a, b) => b[0] - a[0] || a[1] - b[1]).slice(0, 6).map(v => v[1]);
+  const hadOre = st.resourceTiles.mine.length > 0;
   st.resourceTiles = {
     forage: top(found.forage), hunt: top(found.hunt), fish: top(found.fish),
-    wood: top(found.wood), mine: top(found.mine),
+    wood: top(found.wood), mine: top(found.mine), stone: top(found.stone),
   };
+  if (hadOre && st.resourceTiles.mine.length === 0 && s.config.oreDepletion) {
+    emitEvent(s, {
+      type: EventType.OreDepleted, factions: [st.factionId],
+      x: st.x, y: st.y, severity: 3,
+      text: `Y${yearOf(s.tick)}: The mines of ${st.name} run dry. The old veins are spent.`,
+    });
+  }
 }
 
 export interface ScoredOffer { action: ActionId; target: number; score: number; work: number }
@@ -87,10 +105,56 @@ export function scoreOffers(s: SimState, i: number): ScoredOffer[] {
 
   if (!isChild) {
     // gathering — payoff scales with settlement food scarcity (rolling avg signal)
-    const scarcity = Math.max(30, Math.min(260, 300 - (st.foodPerCapitaAvg / 10) | 0));
+    const scarcity = Math.max(30, Math.min(260, 300 - ((effFood(st) / 100) | 0)));
     for (const t of st.resourceTiles.forage) mk(ActionId.Forage, t, scarcity + (s.map.fertility[t] >> 2), 4);
     for (const t of st.resourceTiles.hunt) mk(ActionId.Hunt, t, scarcity + (s.map.game[t] >> 2), 6);
     for (const t of st.resourceTiles.fish) mk(ActionId.Fish, t, scarcity + (s.map.fish[t] >> 2), 4);
+
+    // farming (M2): sow in spring/summer, harvest ripe — the food backbone
+    const season = seasonOf(s.tick);
+    let sowShown = 0, harvestShown = 0;
+    for (const plot of st.farmPlots) {
+      const c = s.map.crop[plot];
+      if (c >= 200 && harvestShown < 6) {
+        mk(ActionId.FarmWork, plot, 250 + (scarcity >> 1), 3);
+        harvestShown++;
+      } else if (c === 0 && (season === Season.Spring || season === Season.Summer) && sowShown < 6) {
+        mk(ActionId.FarmWork, plot, 130 + (scarcity >> 1), 3);
+        sowShown++;
+      }
+    }
+
+    // wood/stone/ore economy (M2) — industry throttles when food is insecure:
+    // a hungry village sends no miners (labor goes to the granary first)
+    const industry = Math.max(25, Math.min(100, (effFood(st) / 250) | 0));
+    const ind = (base: number) => (base * industry / 100) | 0;
+    const wood = st.stockpile[Good.Wood];
+    if (wood < 150) {
+      for (const t of st.resourceTiles.wood) mk(ActionId.ChopWood, t, ind(60 + (150 - wood)), 4);
+    }
+    const stone = st.stockpile[Good.Stone];
+    if (stone < 120) {
+      for (const t of st.resourceTiles.stone) mk(ActionId.Mine, t, ind(40 + ((120 - stone) >> 1)), 5);
+    }
+    const hasWorkshop = st.buildings.some(b => b.kind === BuildingKind.Workshop && b.stage === 3);
+    for (const t of st.resourceTiles.mine) {
+      mk(ActionId.Mine, t, ind(hasWorkshop ? 130 : 80), 5);
+    }
+
+    // construction sites advertise (03 smart-world)
+    for (const b of st.buildings) {
+      if (b.stage >= 3) continue;
+      const tile = b.y * s.map.size + b.x;
+      mk(b.kind === BuildingKind.House ? ActionId.BuildHouse : ActionId.BuildStructure,
+        tile, ind(140 + (st.crowding >> 1)), 3);
+    }
+
+    // craftEquipment — workshop with ore (04 dwarven smithing path)
+    if (hasWorkshop && st.stockpile[Good.Ore] >= 2 && wood >= 1) {
+      const toolNeed = Math.max(20, 120 - st.stockpile[Good.Tools] * 2);
+      const ws = st.buildings.find(b => b.kind === BuildingKind.Workshop && b.stage === 3)!;
+      mk(ActionId.CraftEquipment, ws.y * s.map.size + ws.x, ind(toolNeed), 4);
+    }
 
     // court — low-pressure default for unpaired adults
     if (p.pairId[i] < 0 && !(p.flags[i] & PawnFlag.Elder)) {
@@ -107,7 +171,10 @@ export function utilityAISystem(s: SimState): void {
   // settlement caches + rolling signals
   if (s.tick % 90 === 1) {
     for (const st of s.settlements) {
-      if (!st.razed) refreshResourceTiles(s, st);
+      if (!st.razed) {
+        refreshResourceTiles(s, st);
+        planSettlement(s, st);
+      }
     }
   }
   if (s.tick % 30 === 2) {
@@ -121,8 +188,13 @@ export function utilityAISystem(s: SimState): void {
     for (const st of s.settlements) {
       if (st.razed || st.popCache === 0) continue;
       const totalFood = st.stockpile[Good.Grain] + st.stockpile[Good.Meat] + st.stockpile[Good.Fish];
-      const fpc = Math.min(4000, (totalFood * 1000 / st.popCache) | 0);
+      // ×1000 fixed point: 21000 ≈ one year of food per capita
+      const fpc = Math.min(40000, (totalFood * 1000 / st.popCache) | 0);
       st.foodPerCapitaAvg += ((fpc - st.foodPerCapitaAvg) / 3) | 0;
+      // net flow, annualized per capita (12 windows/yr), year-scale smoothing
+      const flow = ((totalFood - st.lastFoodStock) * 12 * 1000 / st.popCache) | 0;
+      st.lastFoodStock = totalFood;
+      st.foodFlowAvg += ((Math.max(-40000, Math.min(40000, flow)) - st.foodFlowAvg) / 12) | 0;
       st.crowding = Math.min(255, Math.max(0, st.popCache - st.buildings.length * 6) * 3);
     }
   }

@@ -40,9 +40,19 @@
       padding: 0 10px; gap: 18px; white-space: nowrap; color: var(--dim); font-size: 13px; }
     #timeline-bar { grid-area: timeline; background: var(--panel2); border-top: 1px solid var(--border);
       padding: 8px 12px; display: flex; align-items: center; gap: 12px; }
-    #timeline { flex: 1; height: 26px; position: relative; cursor: pointer;
+    #timeline { flex: 1; height: 26px; cursor: pointer;
       background: #14141f; border-radius: 4px; }
-    .tl-cursor { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--accent); }
+    #tl-tooltip { position: fixed; bottom: 54px; background: #1c1c2bf2; border: 1px solid var(--border);
+      border-radius: 6px; padding: 6px 10px; font-size: 12px; pointer-events: none;
+      max-width: 300px; transform: translateX(-50%); z-index: 20; }
+    #tl-tooltip .yr { color: var(--accent); font-weight: 600; }
+    #replay-badge { background: var(--warn); color: #14141f; font-size: 11px; font-weight: 700;
+      padding: 2px 8px; border-radius: 3px; letter-spacing: 1px; }
+    #seek-status { position: absolute; bottom: 90px; left: 50%; transform: translateX(-50%);
+      background: #1c1c2bee; padding: 6px 16px; border-radius: 6px; border: 1px solid var(--border);
+      color: var(--dim); display: none; }
+    #tab-notice { position: fixed; inset: 0; background: #14141fee; z-index: 100;
+      display: none; align-items: center; justify-content: center; font-size: 18px; color: var(--dim); }
     button.ctl { background: var(--panel); color: var(--text); border: 1px solid var(--border);
       border-radius: 4px; padding: 4px 10px; cursor: pointer; font-size: 13px; }
     button.ctl:hover { background: var(--panel2); border-color: var(--accent); }
@@ -75,21 +85,29 @@
     <div id="llm-status">Checking for local kings...</div>
     <div id="resume-list"></div>
   </div>
+  <div id="tab-notice">This world is open in another tab — this tab is read-only.</div>
   <div id="app">
     <div id="world-wrap">
       <canvas id="world"></canvas>
       <div id="hud"><span id="hud-year">Year 0</span> · <span id="hud-pop">—</span><div class="era" id="hud-island"></div></div>
       <div id="inspector" style="display:none"></div>
+      <div id="seek-status"></div>
     </div>
     <div id="chronicle-rail"></div>
     <div id="event-feed"></div>
     <div id="timeline-bar">
       <button class="ctl" id="btn-pause">⏸</button>
-      <button class="ctl speed" data-s="1">1×</button>
-      <button class="ctl speed active" data-s="4">4×</button>
-      <button class="ctl speed" data-s="16">16×</button>
-      <div id="timeline"><div class="tl-cursor" style="left:0"></div></div>
+      <button class="ctl speed" data-s="1" title="kings think deeply">1×</button>
+      <button class="ctl speed active" data-s="4" title="kings think quickly">4×</button>
+      <button class="ctl speed" data-s="16" title="kings rule by instinct">16×</button>
+      <canvas id="timeline" height="26"></canvas>
+      <div id="tl-tooltip" style="display:none"></div>
+      <span id="replay-badge" style="display:none">REPLAY</span>
+      <button class="ctl" id="btn-present" style="display:none">Jump to present ▶▶</button>
       <div id="year-label">Year 0</div>
+      <button class="ctl" id="btn-export" title="export journal (share this world)">⬇</button>
+      <button class="ctl" id="btn-import" title="import journal">⬆</button>
+      <input type="file" id="import-file" accept=".json" style="display:none" />
     </div>
   </div>
   <script type="module" src="/src/main.ts"></script>

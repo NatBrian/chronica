@@ -3,6 +3,7 @@ import { Journal } from '../../shared/types';
 import { SimState } from '../state';
 import { calendarSystem } from './calendarSystem';
 import { weatherSystem } from './weatherSystem';
+import { cropSystem } from './cropSystem';
 import { needsSystem } from './needsSystem';
 import { utilityAISystem } from './utilityAISystem';
 import { pathMoveSystem } from './pathMoveSystem';
@@ -16,7 +17,7 @@ export type System = (s: SimState, ctx: SystemCtx) => void;
 export const SYSTEMS: System[] = [
   calendarSystem,     // 1 season/year rollover
   weatherSystem,      // 2 rain, drought, winter severity
-  // 3 cropSystem        (M2)
+  (s) => cropSystem(s),       // 3
   (s) => needsSystem(s),      // 4
   // 5 brainInboxSystem  (M3/M4)
   (s) => utilityAISystem(s),  // 6

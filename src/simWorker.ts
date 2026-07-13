@@ -2,7 +2,7 @@
 // via transferable buffers (01). This file is NOT /src/sim (it may use timers).
 import { Sim } from './sim/engine';
 import { WorldConfig, defaultConfig, TICKS_PER_YEAR, JournalEntry, Journal, ACTION_NAMES } from './shared/types';
-import { AGE_SCALE, PawnFlag } from './sim/state';
+import { AGE_SCALE, PawnFlag, packSnapshot, snapshot, restore, unpackSnapshot } from './sim/state';
 import { scoreOffers } from './sim/systems/utilityAISystem';
 
 let sim: Sim | null = null;
@@ -10,6 +10,11 @@ let ticksPerSec = 0;           // 0 = paused
 let timer: ReturnType<typeof setInterval> | null = null;
 let tickRemainder = 0;
 let replayMode = false;
+// time machine: when scrubbed into the past, the live "present" is parked here
+let presentPack: ArrayBuffer | null = null;
+let presentTick = 0;
+let lastMajorCount = -1;
+let lastAutosaveDecade = 0;
 
 const SNAPSHOT_HZ = 20;
 
@@ -43,6 +48,8 @@ function snapshotMsg() {
     t: 'snapshot' as const,
     tick: s.tick,
     year: Math.floor(s.tick / TICKS_PER_YEAR),
+    inPast: presentPack !== null,
+    presentYear: presentPack ? Math.floor(presentTick / TICKS_PER_YEAR) : Math.floor(s.tick / TICKS_PER_YEAR),
     alive: s.alivePawns,
     pawns: { x: px, y: py, factionId: pf, flags: pflags, action: paction, count: n },
     settlements: s.settlements.map(st => ({
@@ -69,6 +76,39 @@ function sendSnapshot(): void {
   ]);
 }
 
+function maybeAutosave(): void {
+  if (!sim || presentPack) return;                 // never autosave a replay view
+  const decade = Math.floor(sim.state.tick / (10 * TICKS_PER_YEAR));
+  if (decade <= lastAutosaveDecade) return;
+  lastAutosaveDecade = decade;
+  const pack = packSnapshot(snapshot(sim.state));
+  post({
+    t: 'autosave',
+    record: {
+      savedAt: Date.now(),
+      seed: sim.journal.header.seed,
+      islandName: sim.state.islandName,
+      tick: sim.state.tick,
+      journal: sim.journal,
+      snapshot: pack,
+    },
+  }, [pack]);
+}
+
+function maybeSendMajors(): void {
+  if (!sim) return;
+  const majors = sim.state.events.filter(e => e.severity >= 3);
+  if (majors.length === lastMajorCount) return;
+  lastMajorCount = majors.length;
+  post({
+    t: 'majorEvents',
+    events: majors.map(e => ({
+      id: e.id, tick: e.tick, type: e.type, severity: e.severity,
+      x: e.x, y: e.y, text: e.text, causes: e.causes,
+    })),
+  });
+}
+
 function loop(): void {
   if (!sim || ticksPerSec === 0) return;
   const ticksPerFrame = ticksPerSec / SNAPSHOT_HZ + tickRemainder;
@@ -76,9 +116,17 @@ function loop(): void {
   tickRemainder = ticksPerFrame - whole;
   for (let i = 0; i < whole; i++) {
     sim.tick();
+    // replaying forward into the parked present → seamless catch-up
+    if (presentPack && sim.state.tick >= presentTick) {
+      presentPack = null;
+      post({ t: 'reachedPresent' });
+      break;
+    }
   }
   const reqs = sim.takeRequests();
-  if (reqs.length > 0 && !replayMode) post({ t: 'requests', requests: reqs });
+  if (reqs.length > 0 && !replayMode && !presentPack) post({ t: 'requests', requests: reqs });
+  maybeAutosave();
+  maybeSendMajors();
   sendSnapshot();
 }
 
@@ -87,10 +135,20 @@ self.onmessage = (e: MessageEvent) => {
   switch (msg.t) {
     case 'init': {
       const config: WorldConfig = { ...defaultConfig(), ...(msg.config ?? {}) };
-      sim = msg.journal
-        ? new Sim(msg.journal as Journal)
-        : Sim.fresh(msg.seed as number, config);
-      replayMode = !!msg.journal && !msg.continueLive;
+      if (msg.resume) {
+        // resume from autosave: reconstruct via journal header, restore snapshot
+        sim = new Sim(msg.resume.journal as Journal);
+        restore(sim.state, unpackSnapshot(msg.resume.snapshot as ArrayBuffer));
+        lastAutosaveDecade = Math.floor(sim.state.tick / (10 * TICKS_PER_YEAR));
+        replayMode = false;
+      } else {
+        sim = msg.journal
+          ? new Sim(msg.journal as Journal)
+          : Sim.fresh(msg.seed as number, config);
+        replayMode = !!msg.journal && !msg.continueLive;
+      }
+      presentPack = null;
+      lastMajorCount = -1;
       post({
         t: 'ready',
         islandName: sim.state.islandName,
@@ -109,9 +167,32 @@ self.onmessage = (e: MessageEvent) => {
     }
     case 'seek': {
       if (!sim) break;
-      const target = Math.floor(msg.year * TICKS_PER_YEAR);
+      const target = Math.min(
+        presentPack ? presentTick : sim.state.tick + 200 * TICKS_PER_YEAR,
+        Math.max(0, Math.floor(msg.year * TICKS_PER_YEAR)),
+      );
+      if (target < (presentPack ? presentTick : sim.state.tick) && !presentPack) {
+        // first scrub into the past — park the present (one world-line, 07)
+        presentTick = sim.state.tick;
+        presentPack = packSnapshot(snapshot(sim.state));
+      }
       sim.seekToTick(target);
-      post({ t: 'seeked', tick: sim.state.tick });
+      if (presentPack && sim.state.tick >= presentTick) {
+        presentPack = null;                        // seeked back to the live edge
+      }
+      lastMajorCount = -1;
+      post({ t: 'seeked', tick: sim.state.tick, inPast: presentPack !== null });
+      maybeSendMajors();
+      sendSnapshot();
+      break;
+    }
+    case 'jumpPresent': {
+      if (!sim || !presentPack) break;
+      restore(sim.state, unpackSnapshot(presentPack));
+      presentPack = null;
+      lastMajorCount = -1;
+      post({ t: 'seeked', tick: sim.state.tick, inPast: false });
+      maybeSendMajors();
       sendSnapshot();
       break;
     }

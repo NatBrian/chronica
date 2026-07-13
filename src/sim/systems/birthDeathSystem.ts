@@ -2,7 +2,7 @@
 // Anti-extinction-spiral: birth rate dips before deaths spike (soft feedback).
 import { EventType, TICKS_PER_YEAR } from '../../shared/types';
 import { RACE_TABLE } from '../raceData';
-import { AGE_SCALE, PawnFlag, SimState } from '../state';
+import { AGE_SCALE, PawnFlag, SimState, effFood } from '../state';
 import { spawnPawn, killPawn } from '../pawnOps';
 import { emitEvent, yearOf } from '../events/events';
 
@@ -87,9 +87,10 @@ export function birthDeathSystem(s: SimState): void {
     ) {
       const st = s.settlements[p.settlementId[i]];
       if (st && !st.razed) {
-        // food damping: births dip before anyone starves (00 pillar)
-        const fpc = st.foodPerCapitaAvg;
-        let damp = fpc <= 400 ? 0 : fpc >= 1400 ? 100 : ((fpc - 400) / 10) | 0;
+        // food damping: births dip before anyone starves (00 pillar).
+        // full births only with ≥ ~1 year of stores per capita; zero below ~3 months
+        const fpc = effFood(st);
+        let damp = fpc <= 6000 ? 0 : fpc >= 25000 ? 100 : ((fpc - 6000) / 190) | 0;
         if (p.mood[i] < 80) damp = (damp * 60 / 100) | 0;
         damp = Math.max(0, damp - (st.crowding >> 2));      // soft capacity (03)
         const num = (rs.breedChanceNum * damp * (64 + (p.fertility[i] >> 1))) / (100 * 128) | 0;

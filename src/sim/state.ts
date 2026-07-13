@@ -81,10 +81,12 @@ export interface Settlement {
   popCache: number;
   moodAvg: number;
   crowding: number;           // 0..255 soft pressure
-  foodPerCapitaAvg: number;   // rolling average ×1000 (fixed point)
+  foodPerCapitaAvg: number;   // rolling stock per capita ×1000 (fixed point)
+  foodFlowAvg: number;        // rolling net flow per capita per year ×1000 (can be negative)
+  lastFoodStock: number;      // previous window's total food (flow measurement)
   lodStatistical: boolean;
   /** cached advertised resource tiles, refreshed periodically (03 smart-world) */
-  resourceTiles: { forage: number[]; hunt: number[]; fish: number[]; wood: number[]; mine: number[] };
+  resourceTiles: { forage: number[]; hunt: number[]; fish: number[]; wood: number[]; mine: number[]; stone: number[] };
 }
 
 export interface LedgerEntry { tick: number; delta: number; why: string }
@@ -230,9 +232,16 @@ export interface SimState {
   outbox: DecisionRequest[];  // requests emitted this tick (drained by engine host)
   journalCursor: number;
   yearStats: YearStats[];
+  deathsByCause: Record<string, number>;
   warTicksThisYear: number;
   // fixed-point global modifiers
   festivalUntil: number;
+}
+
+/** Effective food security: stock plus weighted trend. A full granary with
+ * zero production is NOT wealth — the flow term sees the trajectory. */
+export function effFood(st: Settlement): number {
+  return Math.max(0, st.foodPerCapitaAvg + 2 * st.foodFlowAvg);
 }
 
 export function pairKey(a: number, b: number): number {
@@ -258,7 +267,7 @@ export function createEmptyState(seed: number, config: WorldConfig): SimState {
     plague: { settlementInfections: {} },
     pending: [], nextRequestId: 0, outbox: [],
     journalCursor: 0,
-    yearStats: [], warTicksThisYear: 0,
+    yearStats: [], deathsByCause: {}, warTicksThisYear: 0,
     festivalUntil: 0,
   };
 }
@@ -277,7 +286,7 @@ function pawnBuffers(p: Pawns): ArrayBufferView[] {
 
 function mapBuffers(m: WorldMap): ArrayBufferView[] {
   return [m.elevation, m.waterFlux, m.temperature, m.moisture, m.biome,
-    m.fertility, m.forest, m.ore, m.fish, m.game, m.flags];
+    m.fertility, m.forest, m.ore, m.fish, m.game, m.flags, m.crop];
 }
 
 /** JSON-serializable side of state (rich stores + scalars). */
@@ -294,6 +303,7 @@ function jsonSide(s: SimState): unknown {
     weather: s.weather, plague: s.plague,
     pending: s.pending, nextRequestId: s.nextRequestId,
     journalCursor: s.journalCursor,
+    deathsByCause: s.deathsByCause,
     warTicksThisYear: s.warTicksThisYear, festivalUntil: s.festivalUntil,
     riverCount: s.map.riverCount,
     mapSize: s.map.size,
@@ -331,6 +341,7 @@ export function restore(s: SimState, snap: Snapshot): void {
   s.weather = c.weather; s.plague = c.plague;
   s.pending = c.pending; s.nextRequestId = c.nextRequestId;
   s.journalCursor = c.journalCursor;
+  s.deathsByCause = c.deathsByCause;
   s.warTicksThisYear = c.warTicksThisYear; s.festivalUntil = c.festivalUntil;
   s.map.riverCount = c.riverCount;
   s.events = parsed.events;

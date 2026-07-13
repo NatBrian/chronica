@@ -14,6 +14,7 @@ export interface WorldMap {
   fish: Uint8Array;
   game: Uint8Array;         // huntable animals
   flags: Uint8Array;        // bit 0: river, bit 1: road, bit 2: farm plot, bit 3: burned
+  crop: Uint8Array;         // farm plot growth stage 0 fallow .. 200 ripe (M2)
   riverCount: number;
 }
 
@@ -37,6 +38,7 @@ export function allocMap(size: number): WorldMap {
     fish: new Uint8Array(n),
     game: new Uint8Array(n),
     flags: new Uint8Array(n),
+    crop: new Uint8Array(n),
     riverCount: 0,
   };
 }

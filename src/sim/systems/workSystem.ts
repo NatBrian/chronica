@@ -1,8 +1,9 @@
 // System 8 — action execution at target: gather, eat, rest, court.
 // Yields go straight to the settlement stockpile (hauling abstracted in M1).
-import { ActionId, Good } from '../../shared/types';
-import { PawnFlag, SimState } from '../state';
+import { ActionId, BuildingKind, Good } from '../../shared/types';
+import { PawnFlag, SimState, effFood } from '../state';
 import { RACE_TABLE } from '../raceData';
+import { TileFlag } from '../world/map';
 
 export function workSystem(s: SimState): void {
   const p = s.pawns;
@@ -36,13 +37,16 @@ export function workSystem(s: SimState): void {
     switch (action) {
       case ActionId.EatFromStockpile: {
         if (st && !st.razed) {
-          let need = 2;
+          // famine rationing (anti-spiral): scarce settlements serve half portions
+          const ration = effFood(st) < 8000 ? 1 : 2;
+          let need = ration;
           for (const g of [Good.Grain, Good.Fish, Good.Meat]) {
             const take = Math.min(need, st.stockpile[g]);
             st.stockpile[g] -= take; need -= take;
             if (need === 0) break;
           }
-          if (need < 2) p.hunger[i] = need === 0 ? 15 : 90;
+          const eaten = ration - need;
+          if (eaten > 0) p.hunger[i] = eaten === 2 ? 15 : 70;
         }
         break;
       }
@@ -57,7 +61,7 @@ export function workSystem(s: SimState): void {
         if (st) {
           const gain = 4 + (s.map.game[target] >> 5);
           st.stockpile[Good.Meat] = Math.min(st.granaryCap, st.stockpile[Good.Meat] + gain);
-          s.map.game[target] = Math.max(0, s.map.game[target] - 12);
+          s.map.game[target] = Math.max(0, s.map.game[target] - 8);
         }
         break;
       }
@@ -66,6 +70,69 @@ export function workSystem(s: SimState): void {
           const gain = 3 + (s.map.fish[target] >> 6) + (rs.forestYield > 120 ? 1 : 0);
           st.stockpile[Good.Fish] = Math.min(st.granaryCap, st.stockpile[Good.Fish] + gain);
           s.map.fish[target] = Math.max(20, s.map.fish[target] - 6);
+        }
+        break;
+      }
+      case ActionId.FarmWork: {
+        if (st) {
+          const c = s.map.crop[target];
+          if (c >= 200) {
+            // harvest
+            const gain = (10 + (s.map.fertility[target] >> 3)) * rs.farmSkill / 100 | 0;
+            st.stockpile[Good.Grain] = Math.min(st.granaryCap, st.stockpile[Good.Grain] + gain);
+            s.map.crop[target] = 0;
+          } else if (c === 0 && (s.map.flags[target] & TileFlag.Farm)) {
+            // sow
+            s.map.crop[target] = 1;
+          }
+        }
+        break;
+      }
+      case ActionId.ChopWood: {
+        if (st) {
+          const gain = (3 + (s.map.forest[target] >> 5)) * rs.forestYield / 100 | 0;
+          st.stockpile[Good.Wood] = Math.min(9999, st.stockpile[Good.Wood] + gain);
+          s.map.forest[target] = Math.max(0, s.map.forest[target] - 12);
+        }
+        break;
+      }
+      case ActionId.Mine: {
+        if (st) {
+          const faction = s.factions[p.factionId[i]];
+          const oreHere = s.map.ore[target];
+          if (oreHere > 0) {
+            const gain = Math.min(oreHere, (2 + (rs.mineSkill > 130 ? 2 : 1)));
+            st.stockpile[Good.Ore] = Math.min(9999, st.stockpile[Good.Ore] + gain);
+            if (s.config.oreDepletion) s.map.ore[target] = oreHere - gain;
+            st.stockpile[Good.Stone] = Math.min(9999, st.stockpile[Good.Stone] + 1);
+          } else {
+            st.stockpile[Good.Stone] = Math.min(9999, st.stockpile[Good.Stone] + 3);
+            if (faction) faction.prospectEffort += 1;   // prospecting (02)
+          }
+        }
+        break;
+      }
+      case ActionId.BuildHouse:
+      case ActionId.BuildStructure: {
+        if (st) {
+          const N2 = s.map.size;
+          const b = st.buildings.find(bb => bb.stage < 3 && bb.y * N2 + bb.x === target);
+          if (b) {
+            b.workDone += 1 + (p.strength[i] > 150 ? 1 : 0);
+            b.stage = b.workDone >= 9 ? 3 : (b.workDone / 3) | 0;
+          }
+        }
+        break;
+      }
+      case ActionId.CraftEquipment: {
+        if (st && st.stockpile[Good.Ore] >= 2 && st.stockpile[Good.Wood] >= 1) {
+          st.stockpile[Good.Ore] -= 2;
+          st.stockpile[Good.Wood] -= 1;
+          st.stockpile[Good.Tools] = Math.min(999, st.stockpile[Good.Tools] + 1);
+          const faction = s.factions[p.factionId[i]];
+          if (faction) {
+            faction.equipmentTier = Math.min(3000, faction.equipmentTier + (rs.craftSkill / 20 | 0));
+          }
         }
         break;
       }
@@ -111,8 +178,8 @@ export function workSystem(s: SimState): void {
   if (s.tick % 90 === 7) {
     const m = s.map;
     for (let i = 0; i < m.size * m.size; i++) {
-      if (m.game[i] > 0 && m.game[i] < 180) m.game[i] += 2;
-      if (m.fish[i] > 0 && m.fish[i] < 200) m.fish[i] += 3;
+      if (m.game[i] > 0 && m.game[i] < 200) m.game[i] += 10;
+      if (m.fish[i] > 0 && m.fish[i] < 220) m.fish[i] += 8;
     }
   }
   if (s.tick % 360 === 11) {
