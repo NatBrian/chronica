@@ -38,6 +38,21 @@
     #event-feed { grid-area: feed; height: 28px; background: var(--panel);
       border-top: 1px solid var(--border); overflow: hidden; display: flex; align-items: center;
       padding: 0 10px; gap: 18px; white-space: nowrap; color: var(--dim); font-size: 13px; }
+    #event-feed .ev { cursor: pointer; }
+    #event-feed .ev:hover { color: var(--text); }
+    #event-feed .sev4 { color: var(--warn); }
+    #event-feed .sev5 { color: var(--warn); font-weight: 600; }
+    #chain-view { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%);
+      background: #14141ff2; border: 1px solid var(--border); border-radius: 8px;
+      padding: 12px 16px; display: none; max-width: 90%; z-index: 15; }
+    #chain-view h5 { color: var(--dim); font-weight: 400; margin-bottom: 8px; font-size: 12px;
+      letter-spacing: 1px; }
+    #chain-nodes { display: flex; align-items: center; gap: 8px; overflow-x: auto; }
+    .chain-node { background: var(--panel2); border: 1px solid var(--border); border-radius: 6px;
+      padding: 6px 10px; font-size: 12px; max-width: 200px; cursor: pointer; flex-shrink: 0; }
+    .chain-node:hover { border-color: var(--accent); }
+    .chain-node .cy { color: var(--accent); font-weight: 600; }
+    .chain-arrow { color: var(--dim); flex-shrink: 0; }
     #timeline-bar { grid-area: timeline; background: var(--panel2); border-top: 1px solid var(--border);
       padding: 8px 12px; display: flex; align-items: center; gap: 12px; }
     #timeline { flex: 1; height: 26px; cursor: pointer;
@@ -92,6 +107,10 @@
       <div id="hud"><span id="hud-year">Year 0</span> · <span id="hud-pop">—</span><div class="era" id="hud-island"></div></div>
       <div id="inspector" style="display:none"></div>
       <div id="seek-status"></div>
+      <div id="chain-view">
+        <h5>WHY THIS HAPPENED <span style="float:right;cursor:pointer" id="chain-close">✕</span></h5>
+        <div id="chain-nodes"></div>
+      </div>
     </div>
     <div id="chronicle-rail"></div>
     <div id="event-feed"></div>

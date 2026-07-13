@@ -247,6 +247,36 @@ self.onmessage = (e: MessageEvent) => {
       });
       break;
     }
+    case 'chain': {
+      if (!sim) break;
+      const byId = new Map(sim.state.events.map(ev => [ev.id, ev]));
+      const chain: unknown[] = [];
+      let cur = byId.get(msg.eventId as number);
+      let depth = 0;
+      while (cur && depth < 6) {
+        chain.push({
+          id: cur.id, tick: cur.tick, type: cur.type, severity: cur.severity,
+          x: cur.x, y: cur.y, text: cur.text,
+        });
+        cur = cur.causes.length > 0 ? byId.get(cur.causes[0]) : undefined;
+        depth++;
+      }
+      post({ t: 'chain', chain });
+      break;
+    }
+    case 'recentFeed': {
+      if (!sim) break;
+      const minSev = (msg.minSeverity as number) ?? 2;
+      const evs = sim.state.events.filter(ev => ev.severity >= minSev).slice(-30);
+      post({
+        t: 'feed',
+        events: evs.map(ev => ({
+          id: ev.id, tick: ev.tick, severity: ev.severity, x: ev.x, y: ev.y,
+          text: ev.text, hasCauses: ev.causes.length > 0,
+        })),
+      });
+      break;
+    }
     case 'hash': {
       post({ t: 'hash', hash: sim?.hash() ?? 0, tick: sim?.state.tick ?? 0 });
       break;

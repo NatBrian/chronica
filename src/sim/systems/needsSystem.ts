@@ -21,11 +21,11 @@ export function needsSystem(s: SimState): void {
     const flags = p.flags[i];
     if (!(flags & PawnFlag.Alive)) continue;
 
-    // hunger: +4/day base, +2 in winter, +1 when working (integer, bounded)
+    // hunger: +3/day base, harsher in winter, +1 when working (integer, bounded)
     const working = WORK_ACTIONS.has(p.action[i]);
-    let dh = 4;
-    if (winter) dh += winterMult;
-    if (working) dh += 1;
+    let dh = 3;
+    if (winter) dh += winterMult - 1;
+    if (working && (s.tick & 1) === 0) dh += 1;
     if (flags & PawnFlag.Child) dh -= 1;
     p.hunger[i] = Math.min(255, p.hunger[i] + dh);
 

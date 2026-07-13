@@ -24,7 +24,7 @@ export function genesis(seed: number, config: WorldConfig): SimState {
 
   for (let f = 0; f < gen.spawns.length && f < 4; f++) {
     const spawn = gen.spawns[f];
-    const race = spawn.race;
+    const race = config.mirrorMatch ? Race.Human : spawn.race;
     const rs = RACE_TABLE[race];
     const faction: Faction = {
       id: f, race,
@@ -54,6 +54,7 @@ export function genesis(seed: number, config: WorldConfig): SimState {
       granaryCap: 4000, popCache: 0, moodAvg: 150, crowding: 0,
       foodPerCapitaAvg: 22000, foodFlowAvg: 0, lastFoodStock: 3100, lodStatistical: false,
       resourceTiles: { forage: [], hunt: [], fish: [], wood: [], mine: [], stone: [] },
+      fertileLand: 40,
     };
     settlement.stockpile[Good.Grain] = 2600;
     settlement.stockpile[Good.Meat] = 500;

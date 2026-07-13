@@ -92,7 +92,7 @@ export function birthDeathSystem(s: SimState): void {
         const fpc = effFood(st);
         let damp = fpc <= 6000 ? 0 : fpc >= 25000 ? 100 : ((fpc - 6000) / 190) | 0;
         if (p.mood[i] < 80) damp = (damp * 60 / 100) | 0;
-        damp = Math.max(0, damp - (st.crowding >> 2));      // soft capacity (03)
+        damp = Math.max(0, damp - (st.crowding >> 1));      // soft capacity (03)
         const num = (rs.breedChanceNum * damp * (64 + (p.fertility[i] >> 1))) / (100 * 128) | 0;
         if (num > 0 && rngBirths.chance(num, 1000)) {
           p.flags[i] |= PawnFlag.Pregnant;

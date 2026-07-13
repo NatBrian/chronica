@@ -39,10 +39,10 @@ export function planSettlement(s: SimState, st: Settlement): void {
   if (st.razed) return;
   const N = s.map.size;
 
-  // farm-plot expansion toward pop/2.2 plots
-  const targetPlots = Math.min(120, Math.ceil(st.popCache / 2.2));
+  // farm-plot expansion: roughly one plot per mouth (a pawn can tend several)
+  const targetPlots = Math.min(140, st.popCache + 15);
   if (st.farmPlots.length < targetPlots) {
-    let need = Math.min(6, targetPlots - st.farmPlots.length);
+    let need = Math.min(10, targetPlots - st.farmPlots.length);
     for (const [x, y] of ringSpots(s, st.x, st.y, 12)) {
       if (need === 0) break;
       const i = y * N + x;
@@ -76,6 +76,19 @@ export function planSettlement(s: SimState, st: Settlement): void {
       st.stockpile[Good.Wood] -= 25;
       st.stockpile[Good.Stone] -= 30;
       st.buildings.push({ kind: BuildingKind.Workshop, x: spot[0], y: spot[1], stage: 0, hp: 60, workDone: 0 });
+    }
+  }
+
+  // temple (04 light religion): pious cultures build one once established
+  const faction = s.factions[st.factionId];
+  if (sites < 2 && faction && faction.culture.piety > 100 && st.popCache > 70 &&
+      !st.buildings.some(b => b.kind === BuildingKind.Temple) &&
+      st.stockpile[Good.Stone] >= 50 && st.stockpile[Good.Wood] >= 20) {
+    const spot = freeSpot(s, st);
+    if (spot) {
+      st.stockpile[Good.Stone] -= 50;
+      st.stockpile[Good.Wood] -= 20;
+      st.buildings.push({ kind: BuildingKind.Temple, x: spot[0], y: spot[1], stage: 0, hp: 80, workDone: 0 });
     }
   }
 

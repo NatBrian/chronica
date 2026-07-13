@@ -133,6 +133,8 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
       }
       case 'snapshot': latest = msg; break;
       case 'majorEvents': majors = msg.events; break;
+      case 'feed': renderFeed(msg.events); break;
+      case 'chain': renderChain(msg.chain); break;
       case 'inspection': showInspector(msg.pawn); break;
       case 'seeked': {
         seekStatus.style.display = 'none';
@@ -348,8 +350,59 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
     });
   }
 
-  // ---- event feed ----
+  // ---- event feed (07): clickable ticker → camera jump + causality chain ----
   const feed = document.getElementById('event-feed')!;
+  const chainView = document.getElementById('chain-view')!;
+  const chainNodes = document.getElementById('chain-nodes')!;
+  document.getElementById('chain-close')!.addEventListener('click', () => {
+    chainView.style.display = 'none';
+  });
+  let lastFeedPoll = 0;
+  let feedIds = '';
+
+  interface FeedEvent { id: number; tick: number; severity: number; x: number; y: number; text: string; hasCauses: boolean }
+
+  function renderFeed(events: FeedEvent[]): void {
+    const key = events.map(ev => ev.id).join(',');
+    if (key === feedIds) return;
+    feedIds = key;
+    feed.innerHTML = '';
+    for (const ev of events.slice(-8).reverse()) {
+      const span = document.createElement('span');
+      span.className = `ev sev${ev.severity}`;
+      span.textContent = ev.text;
+      span.addEventListener('click', () => {
+        renderer.camera.cx = ev.x; renderer.camera.cy = ev.y;
+        if (renderer.camera.level < 2) renderer.camera.level = 2;
+        worker.postMessage({ t: 'chain', eventId: ev.id });
+      });
+      feed.appendChild(span);
+    }
+  }
+
+  interface ChainNode { id: number; tick: number; severity: number; x: number; y: number; text: string }
+
+  function renderChain(chain: ChainNode[]): void {
+    if (!chain || chain.length === 0) return;
+    chainNodes.innerHTML = '';
+    chain.forEach((node, idx) => {
+      if (idx > 0) {
+        const arrow = document.createElement('span');
+        arrow.className = 'chain-arrow';
+        arrow.textContent = '⟵ because';
+        chainNodes.appendChild(arrow);
+      }
+      const el = document.createElement('div');
+      el.className = 'chain-node';
+      el.innerHTML = `<span class="cy">Y${Math.floor(node.tick / TICKS_PER_YEAR)}</span> ${node.text.replace(/^Y\d+: /, '')}`;
+      el.addEventListener('click', () => {
+        renderer.camera.cx = node.x; renderer.camera.cy = node.y;
+        doSeek(node.tick / TICKS_PER_YEAR);
+      });
+      chainNodes.appendChild(el);
+    });
+    chainView.style.display = 'block';
+  }
 
   // ---- render loop ----
   let lastT = performance.now();
@@ -363,9 +416,10 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
       hudYear.textContent = `Year ${latest.year}`;
       yearLabel.textContent = `Year ${latest.year}`;
       hudPop.textContent = `${latest.alive} souls`;
-      if (latest.eventsTail.length > 0) {
-        feed.textContent = latest.eventsTail.slice(-3).map(ev => ev.text).join('   ·   ');
-      }
+    }
+    if (now - lastFeedPoll > 900) {
+      lastFeedPoll = now;
+      worker.postMessage({ t: 'recentFeed', minSeverity: 2 });
     }
     requestAnimationFrame(frame);
   }

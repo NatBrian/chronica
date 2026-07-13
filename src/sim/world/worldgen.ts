@@ -232,7 +232,10 @@ function generateOnce(subSeed: number, config: WorldConfig) {
   }
 
   // --- 6. Spawn sites ---
-  const spawns = pickSpawns(map, rng);
+  const raceMix: Race[] = config.mirrorMatch
+    ? [Race.Human, Race.Human, Race.Human, Race.Human]
+    : [Race.Human, Race.Elf, Race.Dwarf, Race.Orc];
+  const spawns = pickSpawns(map, rng, raceMix);
 
   // --- 7. Naming ---
   const name = islandName(rng);
@@ -287,7 +290,7 @@ function siteScore(map: WorldMap, race: Race, cx: number, cy: number): number {
   }
 }
 
-function pickSpawns(map: WorldMap, rng: Rng): SpawnSite[] {
+function pickSpawns(map: WorldMap, rng: Rng, raceMix: Race[]): SpawnSite[] {
   const N = map.size;
   const step = Math.max(6, N >> 5);
   const candidates: { x: number; y: number; scores: number[] }[] = [];
@@ -297,16 +300,19 @@ function pickSpawns(map: WorldMap, rng: Rng): SpawnSite[] {
       if (scores.some(s => s > 0)) candidates.push({ x, y, scores });
     }
   }
-  const minDist = N / 4.5;
+  // capped so big maps still have a contested middle (02 §shared frontier)
+  const minDist = Math.min(58, N / 4.5);
   const spawns: SpawnSite[] = [];
-  // race order shuffled per world so no race systematically claims first pick
-  const raceOrder = rng.shuffle([Race.Human, Race.Elf, Race.Dwarf, Race.Orc]);
+  // slot order shuffled per world so no slot systematically claims first pick
+  const slotOrder = rng.shuffle(raceMix.map((_, i) => i));
   // global best per race (ignoring distance constraints) — the fairness denominator
   const globalBest = [0, 0, 0, 0];
   for (const c of candidates) {
     for (let r = 0; r < 4; r++) if (c.scores[r] > globalBest[r]) globalBest[r] = c.scores[r];
   }
-  for (const race of raceOrder) {
+  const bySlot: (SpawnSite | null)[] = raceMix.map(() => null);
+  for (const slot of slotOrder) {
+    const race = raceMix[slot];
     let bestC: { x: number; y: number; s: number } | null = null;
     for (const c of candidates) {
       const s = c.scores[race];
@@ -321,11 +327,12 @@ function pickSpawns(map: WorldMap, rng: Rng): SpawnSite[] {
     }
     if (bestC) {
       const rel = globalBest[race] > 0 ? Math.round((bestC.s * 100) / globalBest[race]) : 0;
-      spawns.push({ race, x: bestC.x, y: bestC.y, score: bestC.s, relScore: rel });
+      const site = { race, x: bestC.x, y: bestC.y, score: bestC.s, relScore: rel };
+      spawns.push(site);
+      bySlot[slot] = site;
     }
   }
-  spawns.sort((a, b) => a.race - b.race);
-  return spawns;
+  return bySlot.filter((s): s is SpawnSite => s !== null);
 }
 
 function validate(map: WorldMap, spawns: SpawnSite[], config: WorldConfig): string[] {

@@ -53,6 +53,16 @@ export function refreshResourceTiles(s: SimState, st: Settlement): void {
   }
   const top = (arr: [number, number][]) =>
     arr.sort((a, b) => b[0] - a[0] || a[1] - b[1]).slice(0, 6).map(v => v[1]);
+  // carrying-capacity base: how much farmable land does this site command?
+  let fertile = 0;
+  for (let dy = -R; dy <= R; dy++) {
+    for (let dx = -R; dx <= R; dx++) {
+      const x = st.x + dx, y = st.y + dy;
+      if (x < 0 || y < 0 || x >= N || y >= N) continue;
+      if (s.map.fertility[y * N + x] >= 55 && fieldDist(field, x, y) !== 65535) fertile++;
+    }
+  }
+  st.fertileLand = fertile;
   const hadOre = st.resourceTiles.mine.length > 0;
   st.resourceTiles = {
     forage: top(found.forage), hunt: top(found.hunt), fish: top(found.fish),
@@ -115,10 +125,12 @@ export function scoreOffers(s: SimState, i: number): ScoredOffer[] {
     let sowShown = 0, harvestShown = 0;
     for (const plot of st.farmPlots) {
       const c = s.map.crop[plot];
-      if (c >= 200 && harvestShown < 6) {
+      if (c >= 200 && harvestShown < 24) {
         mk(ActionId.FarmWork, plot, 250 + (scarcity >> 1), 3);
         harvestShown++;
-      } else if (c === 0 && (season === Season.Spring || season === Season.Summer) && sowShown < 6) {
+      } else if (c === 0 && sowShown < 24 &&
+                 (season === Season.Spring || (season === Season.Summer && s.tick % 90 < 45))) {
+        // no late-summer sowing — frost would take the crop before harvest
         mk(ActionId.FarmWork, plot, 130 + (scarcity >> 1), 3);
         sowShown++;
       }
@@ -195,7 +207,15 @@ export function utilityAISystem(s: SimState): void {
       const flow = ((totalFood - st.lastFoodStock) * 12 * 1000 / st.popCache) | 0;
       st.lastFoodStock = totalFood;
       st.foodFlowAvg += ((Math.max(-40000, Math.min(40000, flow)) - st.foodFlowAvg) / 12) | 0;
-      st.crowding = Math.min(255, Math.max(0, st.popCache - st.buildings.length * 6) * 3);
+      // crowding vs the land's carrying capacity (03 §soft capacity):
+      // how many mouths can farms + hunting + fishing + foraging feed here?
+      const rt = st.resourceTiles;
+      // land-based, pop-independent: fertile tiles ≈ 1 mouth each (farming),
+      // plus sustainable hunt/fish/forage — no feedback through claimed plots
+      const capacity = ((st.fertileLand * 9) / 10 | 0) + rt.hunt.length * 3 +
+        rt.fish.length * 4 + rt.forage.length * 2 + 6;
+      const crowdPct = (st.popCache * 100 / capacity) | 0;
+      st.crowding = crowdPct > 80 ? Math.min(255, (crowdPct - 80) * 5) : 0;
     }
   }
 

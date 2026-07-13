@@ -90,6 +90,7 @@ export interface WorldConfig {
   injectors: boolean;
   genetics: boolean;
   decisionWindowTicks: number; // uniform window W (05 §Latency fairness)
+  mirrorMatch: boolean;        // 4 identical human factions (04 engine-fairness soak)
   keyframeIntervalYears: number;
   namedCapBase: number;
   namedCapMax: number;
@@ -107,6 +108,7 @@ export function defaultConfig(): WorldConfig {
     injectors: true,
     genetics: true,
     decisionWindowTicks: 3,
+    mirrorMatch: false,
     keyframeIntervalYears: 10,
     namedCapBase: 30,
     namedCapMax: 50,

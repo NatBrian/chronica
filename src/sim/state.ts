@@ -87,6 +87,8 @@ export interface Settlement {
   lodStatistical: boolean;
   /** cached advertised resource tiles, refreshed periodically (03 smart-world) */
   resourceTiles: { forage: number[]; hunt: number[]; fish: number[]; wood: number[]; mine: number[]; stone: number[] };
+  /** farmable tiles (fert ≥ 55) within working radius — carrying-capacity base */
+  fertileLand: number;
 }
 
 export interface LedgerEntry { tick: number; delta: number; why: string }
@@ -97,6 +99,7 @@ export interface FactionPairState {
   ledger: LedgerEntry[];      // rolling, capped
   embargo: boolean;
   truceUntil: number;         // tick
+  allianceSince?: number;     // tick the current alliance formed
 }
 
 export interface War {
@@ -108,6 +111,7 @@ export interface War {
   causeEventIds: number[];
   targetSettlement: number;
   bothAggressors?: boolean;   // D4 mutual declaration
+  musterCooldownUntil?: number; // campaigns pace out — no raid conveyor
 }
 
 export interface Faction {
@@ -156,6 +160,7 @@ export interface Squad {
   state: 'muster' | 'march' | 'fight' | 'rout' | 'defend' | 'disband';
   warId: number;
   homeSettlement: number;
+  pathIdx: number;
 }
 
 export interface Caravan {
@@ -168,6 +173,7 @@ export interface Caravan {
   escorts: number[];
   state: 'travel' | 'return' | 'done';
   raided: boolean;
+  pathIdx: number;
 }
 
 export interface Monster {
@@ -244,13 +250,15 @@ export function effFood(st: Settlement): number {
   return Math.max(0, st.foodPerCapitaAvg + 2 * st.foodFlowAvg);
 }
 
+export const MAX_FACTIONS = 8;   // 4 at genesis; splits/rebellions may add more
+
 export function pairKey(a: number, b: number): number {
-  return a < b ? a * 4 + b : b * 4 + a;
+  return a < b ? a * MAX_FACTIONS + b : b * MAX_FACTIONS + a;
 }
 
 export function createEmptyState(seed: number, config: WorldConfig): SimState {
   const pairs: FactionPairState[] = [];
-  for (let i = 0; i < 16; i++) {
+  for (let i = 0; i < 64; i++) {
     pairs.push({ diplo: DiploState.Neutral, grudge: 0, ledger: [], embargo: false, truceUntil: 0 });
   }
   return {
