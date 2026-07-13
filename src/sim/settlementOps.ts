@@ -58,7 +58,7 @@ export function planSettlement(s: SimState, st: Settlement): void {
   const sites = st.buildings.filter(b => b.stage < 3).length;
   const houses = st.buildings.filter(b => b.kind === BuildingKind.House && b.stage === 3).length;
 
-  // house site when crowded (soft capacity — 03)
+  // house site when crowded (soft capacity; 03)
   if (sites < 2 && st.popCache > houses * 7 && st.stockpile[Good.Wood] >= 30) {
     const spot = freeSpot(s, st);
     if (spot) {

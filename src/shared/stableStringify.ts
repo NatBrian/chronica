@@ -1,4 +1,4 @@
-/** JSON.stringify with sorted object keys — stable across construction order. */
+/** JSON.stringify with sorted object keys; stable across construction order. */
 export function stableStringify(value: unknown): string {
   return JSON.stringify(sortValue(value));
 }

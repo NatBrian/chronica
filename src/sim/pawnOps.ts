@@ -21,7 +21,7 @@ export function spawnPawn(s: SimState, o: SpawnOpts, rng: Rng): number {
   const p = s.pawns;
   const max = s.config.maxPawns;
   let idx = -1;
-  // lowest free index — deterministic
+  // lowest free index; deterministic
   for (let i = 0; i < max; i++) {
     if (!(p.flags[i] & PawnFlag.Alive)) { idx = i; break; }
   }

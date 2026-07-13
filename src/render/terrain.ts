@@ -1,4 +1,4 @@
-// Terrain chunk baking — static terrain rendered once per zoom level into
+// Terrain chunk baking: static terrain rendered once per zoom level into
 // offscreen chunk canvases; per frame we only blit visible chunks (06).
 import { Biome } from '../shared/types';
 import { DB32_RGB, P } from './palette';

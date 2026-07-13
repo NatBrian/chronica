@@ -1,5 +1,5 @@
 // RuleBrain (05): grudge-weighted scoring over the same options the LLM sees.
-// Journaled identically — replay cannot tell the difference. Lives in /sim so
+// Journaled identically; replay cannot tell the difference. Lives in /sim so
 // the engine can synthesize deadline fallbacks deterministically.
 import { DecisionResult } from '../../shared/types';
 import { SimState, pairKey } from '../state';
@@ -10,7 +10,7 @@ import { Rng, fnv1a } from '../rng/rng';
 
 export function ruleBrainDecide(s: SimState, req: PendingDecision): DecisionResult {
   // Pure function of (seed, requestId): replay may skip this call entirely
-  // (journal already has the entry) — a shared stream would desync. (01)
+  // (journal already has the entry); a shared stream would desync. (01)
   const rng = new Rng((fnv1a(`kingFallback:${req.requestId}`) ^ s.seed) >>> 0);
   const fid = req.factionId;
   const f = s.factions[fid];
@@ -35,7 +35,7 @@ export function ruleBrainDecide(s: SimState, req: PendingDecision): DecisionResu
     switch (op) {
       case 'DECLARE_WAR': {
         const advantage = myArmy - theirArmy;
-        // desperation raids: a starving people raids regardless of odds —
+        // desperation raids: a starving people raids regardless of odds;
         // but a DYING people (too few spears) hunkers down instead
         const desperate = hungry && pop >= 90;
         score = (pair?.grudge ?? 0) * 14 + (advantage > 0 ? 22 : desperate ? -5 : -35)
@@ -122,7 +122,7 @@ function templateReasoning(king: string, choice: string, factionName: string): s
     ACCEPT_TRUCE: `${king} accepts the truce. Wounds need binding.`,
     REJECT_TRUCE: `${king} will not sheathe a half-drawn blade.`,
     DEMAND_TRIBUTE: `${king} sees weakness and names its price.`,
-    PAY_TRIBUTE: `${king} pays — grain is cheaper than graves.`,
+    PAY_TRIBUTE: `${king} pays; grain is cheaper than graves.`,
     REFUSE_TRIBUTE: `${king} will not kneel for threats.`,
     PROPOSE_TRADE: `${king} reckons more is won by wagon than by sword.`,
     PROPOSE_ALLIANCE: `${king} seeks friends against uncertain years.`,
@@ -137,7 +137,7 @@ function templateReasoning(king: string, choice: string, factionName: string): s
     CONSOLIDATE: `${king} tends the hearth and bides.`,
     TAKE_TRIBUTE: `${king} takes the victor's due.`,
     SHIFT_BORDER: `${king} redraws the border in the victor's ink.`,
-    VASSALIZE: `${king} spares the defeated — as servants.`,
+    VASSALIZE: `${king} spares the defeated; as servants.`,
     RAZE: `${king} orders the torches lit. Let it be remembered.`,
   };
   return lines[op] ?? `${king} decides: ${choice}.`;

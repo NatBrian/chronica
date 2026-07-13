@@ -1,4 +1,4 @@
-// Chapter detector (05 §Chronicler) — pure rule code clustering DAG events
+// Chapter detector (05 §Chronicler): pure rule code clustering DAG events
 // into narrative units. No LLM here; prose is someone else's job.
 import { EventType, WorldEvent, TICKS_PER_YEAR } from '../shared/types';
 
@@ -24,7 +24,7 @@ const MAX_FACTS = 20;
 
 /**
  * Cluster events beyond `fromEventId` into chapter drafts. Only clusters
- * CLOSED arcs (war ended, succession crowned...) — open arcs wait.
+ * CLOSED arcs (war ended, succession crowned...); open arcs wait.
  * Returns drafts + the new cursor (last event id consumed by a closed arc
  * or safely skipped).
  */
@@ -50,7 +50,7 @@ export function detectChapters(
       arc.push(e);
       if (e.type === EventType.PeaceMade || e.type === EventType.Truce) { closed = true; break; }
     }
-    if (!closed) continue;                       // war still burning — wait
+    if (!closed) continue;                       // war still burning; wait
     arc.forEach(e => consumed.add(e.id));
     // split long wars into parts (05 §chunking)
     const parts = chunk(arc, MAX_FACTS);
@@ -111,7 +111,7 @@ export function detectChapters(
   }
 
   // cursor: everything at or below the highest consumed id that has no
-  // unconsumed OPEN arc before it — conservative: min(open war start)-1
+  // unconsumed OPEN arc before it; conservative: min(open war start)-1
   let cursor = fromEventId;
   const openWarStart = pending.find(e =>
     e.type === EventType.WarDeclared && !consumed.has(e.id));
@@ -176,7 +176,7 @@ export function detectEra(
   const summary = `Years ${fromYear}–${toYear} on ${islandName}: ` +
     (inEra.length === 0
       ? 'seasons turned, harvests came in, and the chroniclers had blessedly little to record.'
-      : `${inEra.length} chapters were written — ${Object.entries(counts).map(([k, v]) => `${v} of ${k}`).join(', ')}. ` +
+      : `${inEra.length} chapters were written: ${Object.entries(counts).map(([k, v]) => `${v} of ${k}`).join(', ')}. ` +
         (wars > famines ? 'It was remembered mostly for its wars.' :
          famines > 0 ? 'It was remembered mostly for its hunger.' :
          'It was remembered, on the whole, kindly.'));

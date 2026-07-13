@@ -1,4 +1,4 @@
-// Worldgen v1 — seed → heightmap → hydrology → climate → biomes → resources
+// Worldgen v1: seed → heightmap → hydrology → climate → biomes → resources
 // → spawn sites → naming → validation (reject-and-reroll). Docs: 02-worldgen.md.
 import { Biome, Race, WorldConfig } from '../../shared/types';
 import { Rng, fnv1a } from '../rng/rng';
@@ -8,7 +8,7 @@ import { islandName } from './names';
 
 export interface SpawnSite {
   race: Race; x: number; y: number; score: number;
-  /** score / best-available-score for this race ×100 — fairness is judged on this */
+  /** score / best-available-score for this race ×100; fairness is judged on this */
   relScore: number;
 }
 
@@ -305,7 +305,7 @@ function pickSpawns(map: WorldMap, rng: Rng, raceMix: Race[]): SpawnSite[] {
   const spawns: SpawnSite[] = [];
   // slot order shuffled per world so no slot systematically claims first pick
   const slotOrder = rng.shuffle(raceMix.map((_, i) => i));
-  // global best per race (ignoring distance constraints) — the fairness denominator
+  // global best per race (ignoring distance constraints); the fairness denominator
   const globalBest = [0, 0, 0, 0];
   for (const c of candidates) {
     for (let r = 0; r < 4; r++) if (c.scores[r] > globalBest[r]) globalBest[r] = c.scores[r];
@@ -346,7 +346,7 @@ function validate(map: WorldMap, spawns: SpawnSite[], config: WorldConfig): stri
   if (spawns.length < 4) problems.push(`only ${spawns.length} viable spawn sites`);
 
   // spawn fairness band (04 §Engine fairness): every race gets ≥55% of the best
-  // site available to ITS race — scale-invariant across race scoring formulas.
+  // site available to ITS race; scale-invariant across race scoring formulas.
   if (spawns.length === 4) {
     for (const sp of spawns) {
       if (sp.score < 25) problems.push(`spawn score ${sp.score} below threshold`);

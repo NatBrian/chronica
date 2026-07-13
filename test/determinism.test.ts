@@ -1,4 +1,4 @@
-// THE determinism tripwire (08 §Testing contract) — first test in the repo.
+// THE determinism tripwire (08 §Testing contract): first test in the repo.
 // (a) same seed twice for 50y → identical hash
 // (b) run 50y, seek back to 25y via keyframe, re-run to 50y → identical hash
 import { describe, it, expect } from 'vitest';

@@ -1,4 +1,4 @@
-// Camera — pan / wheel zoom-to-cursor / 4-level px-per-tile zoom ladder (06/07).
+// Camera: pan / wheel zoom-to-cursor / 4-level px-per-tile zoom ladder (06/07).
 export const ZOOM_LEVELS = [2, 4, 16, 32] as const; // island / region / local / close
 export type ZoomLevel = 0 | 1 | 2 | 3;
 
@@ -74,7 +74,7 @@ export class Camera {
     const px = this.pxPerTile;
     const halfW = this.viewW / 2 / px, halfH = this.viewH / 2 / px;
     const x0f = this.cx - halfW, y0f = this.cy - halfH;
-    // snap to integer device pixels (06 — subpixel shimmer)
+    // snap to integer device pixels (06; subpixel shimmer)
     const offX = Math.round(-x0f * px), offY = Math.round(-y0f * px);
     return {
       x0: Math.max(0, Math.floor(x0f)),

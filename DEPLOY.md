@@ -1,6 +1,6 @@
 # Deploying Chronica
 
-Chronica is a **static bundle** — no server, no database, no headers required
+Chronica is a **static bundle** : no server, no database, no headers required
 (no SharedArrayBuffer). Any static host works.
 
 ```bash
@@ -19,7 +19,7 @@ npx vercel deploy dist --prod
 # Netlify
 npx netlify deploy --dir dist --prod
 
-# GitHub Pages — push dist/ to a gh-pages branch
+# GitHub Pages : push dist/ to a gh-pages branch
 # (vite.config.ts already uses relative base './')
 
 # Or literally any web server
@@ -33,5 +33,5 @@ Post-deploy verification checklist (all verified locally against `vite preview`)
 - [x] BYO-key flow (landing link; key in localStorage only)
 - [x] journal export/import round-trips bit-identically (hash-verified)
 
-Note: visitors' browsers reach THEIR OWN `localhost:11434` for ollama — the
+Note: visitors' browsers reach THEIR OWN `localhost:11434` for ollama : the
 host serves only files. Nothing to configure server-side.

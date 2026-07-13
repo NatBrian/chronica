@@ -1,4 +1,4 @@
-// System 12 — economy v1 (04): numeraire prices, spoilage/wear sinks,
+// System 12: economy v1 (04): numeraire prices, spoilage/wear sinks,
 // physical trade caravans (escortable, raidable), tribute delivery, D5 reroute.
 import { DiploState, EventType, Good, GOOD_COUNT, TICKS_PER_YEAR } from '../../shared/types';
 import { SimState, Settlement, pairKey, PawnFlag, Caravan, effFood } from '../state';
@@ -61,12 +61,12 @@ function spawnTradeCaravans(s: SimState): void {
       const sa = s.settlements.find(st => !st.razed && st.factionId === a);
       const sb = s.settlements.find(st => !st.razed && st.factionId === b);
       if (!sa || !sb) continue;
-      // grain rushes to a starving partner first (dwarves buy grain with ore — 04).
+      // grain rushes to a starving partner first (dwarves buy grain with ore; 04).
       // Neutral neighbors sell to the hungry too; formal Trade opens the rest.
       const aStarves = effFood(sa) < 12000, bStarves = effFood(sb) < 12000;
       if (aStarves !== bStarves) {
         const src = aStarves ? sb : sa, dst = aStarves ? sa : sb;
-        // reserveStores stops OUTGOING wagons only — never blocks relief
+        // reserveStores stops OUTGOING wagons only; never blocks relief
         if (s.factions[src.factionId].reserveStores) continue;
         if (src.stockpile[Good.Grain] > 500) {
           const amount = Math.min(260, (src.stockpile[Good.Grain] / 4) | 0);
@@ -129,7 +129,7 @@ function stepCaravan(s: SimState, c: Caravan): void {
   }
   if (!dest) { c.state = 'done'; return; }
 
-  // raid check: hostile squad nearby (traveling loot is an orc magnet — 04)
+  // raid check: hostile squad nearby (traveling loot is an orc magnet; 04)
   for (const sq of s.squads) {
     if (sq.state === 'disband' || sq.state === 'rout') continue;
     if (sq.factionId === c.factionId) continue;
@@ -216,7 +216,7 @@ function arriveCaravan(s: SimState, c: Caravan, dest: Settlement): void {
     c.state = 'done';
     return;
   }
-  // trade: exchange — load the good the destination has cheapest & home wants
+  // trade: exchange; load the good the destination has cheapest & home wants
   const home = s.settlements[c.from];
   adjustLedger(s, dest.factionId, c.factionId, 1, 'honest trade');
   if (home && !home.razed) {

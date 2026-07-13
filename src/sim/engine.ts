@@ -1,4 +1,4 @@
-// Engine — fixed-order tick pipeline, journal application, keyframes, seek.
+// Engine: fixed-order tick pipeline, journal application, keyframes, seek.
 // World history = f(seed, decision journal). Nothing else. (01 §Determinism)
 import {
   Journal, JournalEntry, WorldConfig, defaultConfig, SIM_VERSION, TICKS_PER_YEAR,
@@ -31,7 +31,7 @@ export class Sim {
     return new Sim({ header: { seed, simVersion: SIM_VERSION, config: cfg }, entries: [] });
   }
 
-  /** One tick — the fixed system order is part of the determinism contract. */
+  /** One tick: the fixed system order is part of the determinism contract. */
   tick(): void {
     const s = this.state;
     s.tick++;
@@ -61,7 +61,7 @@ export class Sim {
   /** Host appends a resolved decision (LLM or fallback). Must be ≥ current tick. */
   submitDecision(entry: JournalEntry): void {
     this.journal.entries.push(entry);
-    // keep sorted by applyAtTick then seq — brainInbox scans linearly
+    // keep sorted by applyAtTick then seq; brainInbox scans linearly
     this.journal.entries.sort((a, b) => a.applyAtTick - b.applyAtTick || a.seq - b.seq);
   }
 

@@ -1,4 +1,4 @@
-// OllamaBrain — direct browser → localhost:11434 (05 §Backend).
+// OllamaBrain: direct browser → localhost:11434 (05 §Backend).
 // Grammar-constrained JSON via `format`: invalid output structurally impossible.
 import { DecisionRequest, DecisionResult } from '../shared/types';
 import { Brain, decisionPrompt, validateResult } from './brain';
@@ -47,7 +47,7 @@ export class OllamaBrain implements Brain {
     const system = [
       `You are the court historian of the island of ${req.islandName}, writing its chronicle.`,
       `Write ONLY from the facts given. Never invent names, places, or years not present in the facts.`,
-      `Tone: plain, poignant, a touch of dry wit. War and famine stated plainly — no gore, no atrocity detail.`,
+      `Tone: plain, poignant, a touch of dry wit. War and famine stated plainly; no gore, no atrocity detail.`,
       `Style: 2-4 paragraphs, 150-450 words total. Refer to years as "the year N".`,
       req.retryNote ? `PREVIOUS ATTEMPT REJECTED: ${req.retryNote}. Fix this.` : '',
     ].filter(Boolean).join('\n');

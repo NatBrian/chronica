@@ -52,7 +52,7 @@ function shell(title: string): HTMLElement {
 }
 
 export function mountSeedBrowser(): void {
-  const root = shell('Chronica — Seed Browser (0–99)');
+  const root = shell('Chronica: Seed Browser (0–99)');
   const info = document.createElement('div');
   info.style.cssText = 'color:#9badb7;margin-bottom:12px';
   root.appendChild(info);
@@ -89,7 +89,7 @@ export function mountSeedBrowser(): void {
 /** Sprite preview (06 §Closed visual loop): all templates at 1×/2×/4× on
  * terrain, plus blacked-out silhouette row for the race-silhouette gate. */
 export function mountSpritePreview(): void {
-  const root = shell('Chronica — Sprite Preview & Quality Gates');
+  const root = shell('Chronica: Sprite Preview & Quality Gates');
   const atlas = bakePawnAtlas();
   const scales = [1, 2, 4, 8];
   const raceNames = ['human', 'elf', 'dwarf', 'orc'];
@@ -158,7 +158,7 @@ export function mountSpritePreview(): void {
 }
 
 export function mountLayerViewer(seed: number, size: number): void {
-  const root = shell(`Chronica — Layer Viewer (seed ${seed})`);
+  const root = shell(`Chronica: Layer Viewer (seed ${seed})`);
   const r = generateWorld(seed, { ...defaultConfig(), mapSize: size });
   const bar = document.createElement('div');
   bar.style.cssText = 'margin-bottom:10px;display:flex;gap:6px;flex-wrap:wrap';

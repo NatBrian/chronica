@@ -28,7 +28,7 @@ describe('economy calibration (04 §Economy stability)', () => {
       }
       const stock = totalFood(sim);
       const pop = sim.state.alivePawns;
-      // surplus proxy: stores keep up with population — at least ~2 months food on hand
+      // surplus proxy: stores keep up with population; at least ~2 months food on hand
       // and stores did not collapse to zero
       ratios.push(stock / Math.max(1, pop));
       expect(pop).toBeGreaterThan(100);
@@ -65,7 +65,7 @@ describe('F-class edge cases (10)', () => {
   it('F1: births defer at MAX_PAWNS, no crash, journal-visible counter', () => {
     const sim = Sim.fresh(5, { mapSize: 128, maxPawns: 200, startPawnsPerFaction: 45 });
     sim.runYears(20);
-    // arrays full or close — sim must keep running with births deferred
+    // arrays full or close; sim must keep running with births deferred
     expect(sim.state.alivePawns).toBeLessThanOrEqual(200);
     expect(sim.state.birthsDeferred).toBeGreaterThan(0);
     // determinism preserved under the cap

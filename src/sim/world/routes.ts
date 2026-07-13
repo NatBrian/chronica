@@ -1,5 +1,5 @@
 // Long-distance routes: cost-aware A* between settlement anchors, cached per
-// (from,to) pair. Pure function of the static passability map — recomputable,
+// (from,to) pair. Pure function of the static passability map; recomputable,
 // so the cache lives outside SimState and determinism is unaffected.
 import { SimState } from '../state';
 import { WorldMap, isPassable, moveCost } from './map';

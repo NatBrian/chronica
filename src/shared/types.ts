@@ -1,4 +1,4 @@
-// Shared enums & types — imported by sim, render, ui, brain.
+// Shared enums & types: imported by sim, render, ui, brain.
 
 export const SIM_VERSION = '1.0.0';
 
@@ -108,7 +108,7 @@ export function defaultConfig(): WorldConfig {
     injectors: true,
     genetics: true,
     // W must cover LLM inference at 1× (10 t/s): 60 ticks = 6s wall-clock.
-    // At 16× the window is 0.4s — kings rule by instinct (05 speed labels).
+    // At 16× the window is 0.4s; kings rule by instinct (05 speed labels).
     decisionWindowTicks: 60,
     mirrorMatch: false,
     keyframeIntervalYears: 10,
@@ -119,7 +119,7 @@ export function defaultConfig(): WorldConfig {
 
 export type DecisionSource = 'ollama' | 'byok' | 'fallback';
 
-/** One journaled decision — the ONLY external input to the sim besides the seed. */
+/** One journaled decision: the ONLY external input to the sim besides the seed. */
 export interface JournalEntry {
   seq: number;
   requestId: number;
@@ -131,7 +131,7 @@ export interface JournalEntry {
   reasoning: string;
   newMemory?: string;
   source: DecisionSource;
-  void?: boolean;           // dead-actor / superseded — stays for bit-identical replay
+  void?: boolean;           // dead-actor / superseded; stays for bit-identical replay
 }
 
 export interface JournalHeader {

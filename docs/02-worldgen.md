@@ -1,4 +1,4 @@
-# 02 — World Generation
+# 02 : World Generation
 
 ## Goal
 
@@ -46,19 +46,19 @@ Whittaker-style lookup on (temperature, moisture, elevation):
 - Output: `biome: Uint8Array` + derived `fertility`, `passability`, `defensibility` maps.
 
 ### 5. Resources
-- **Soil fertility** (from moisture + biome + river adjacency) — drives farming yield.
-- **Forest density** — wood stock, regrows slowly (deforestation is possible and chronicle-worthy).
-- **Ore/stone deposits** — seeded veins in hills/mountains; scarce, uneven on purpose (scarcity = war motive). **Depletion policy:** veins deplete over ~100–150 years of active mining; new veins are discoverable in unexploited hills via prospecting effort thresholds (seeded and deterministic — discovery is earned, not rolled at runtime). The mining map shifts over centuries: old mountain kingdoms decline, fresh ore rushes trigger colonization races — the map itself generates history.
-- **Game animals** — herd spawns by biome; huntable, depletable, migrating.
+- **Soil fertility** (from moisture + biome + river adjacency) : drives farming yield.
+- **Forest density** : wood stock, regrows slowly (deforestation is possible and chronicle-worthy).
+- **Ore/stone deposits** : seeded veins in hills/mountains; scarce, uneven on purpose (scarcity = war motive). **Depletion policy:** veins deplete over ~100–150 years of active mining; new veins are discoverable in unexploited hills via prospecting effort thresholds (seeded and deterministic : discovery is earned, not rolled at runtime). The mining map shifts over centuries: old mountain kingdoms decline, fresh ore rushes trigger colonization races : the map itself generates history.
+- **Game animals** : herd spawns by biome; huntable, depletable, migrating.
 - Deliberate imbalance rule: worldgen validates that resources are *unevenly* distributed (Gini-style check). A fair map is a boring map.
 
 ### 6. Spawn sites
 - Each starting faction gets a settlement site scored for its race's terrain preference (see 04): dwarves near mountains, elves near forest, orcs on steppe, humans on grassland/river.
-- Sites placed with minimum-distance constraint but **shared frontier zones** — contested middle ground is where early friction starts.
+- Sites placed with minimum-distance constraint but **shared frontier zones** : contested middle ground is where early friction starts.
 - Each faction starts with 30–60 pawns, a stockpile, and a named leader.
 
 ### 7. Naming
-- Procedural per-culture name generators (phoneme tables — see 04 §Languages): island name, region names, river/mountain names, settlement names, pawn names.
+- Procedural per-culture name generators (phoneme tables : see 04 §Languages): island name, region names, river/mountain names, settlement names, pawn names.
 - Every named place is chronicle fuel: "the Battle of Redford" beats "battle at tile 214,180".
 
 ## Validation pass (reject-and-reroll)
@@ -72,7 +72,7 @@ After generation, assert:
 
 Fail → increment sub-seed, regenerate (bounded retries, then relax constraints). All deterministic: seed 42 always yields the same accepted island.
 
-**Generator health metric:** the seed browser logs the rejection rate. Rejection >20% means the generator is weak and validation is masking it — fix generation, don't lean on the reroll.
+**Generator health metric:** the seed browser logs the rejection rate. Rejection >20% means the generator is weak and validation is masking it : fix generation, don't lean on the reroll.
 
 ## Data budget
 

@@ -1,4 +1,4 @@
-// System 4 — needs decay, aging, derived mood (03 §Needs model).
+// System 4: needs decay, aging, derived mood (03 §Needs model).
 // Soft-feedback rule: scarcity ramps gradually; mood dips before deaths.
 import { ActionId, Season, TICKS_PER_YEAR } from '../../shared/types';
 import { RACE_TABLE } from '../raceData';
@@ -68,7 +68,7 @@ export function needsSystem(s: SimState): void {
       }
     }
 
-    // starvation / exposure damage — deaths lag sustained deficit (03 damping)
+    // starvation / exposure damage; deaths lag sustained deficit (03 damping)
     if (p.hunger[i] >= 250) {
       p.hp[i] = Math.max(0, p.hp[i] - 2);
     } else if (p.hunger[i] < 180 && p.hp[i] < 100 && (s.tick & 3) === 0) {

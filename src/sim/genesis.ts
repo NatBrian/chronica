@@ -1,4 +1,4 @@
-// Genesis — one-time world initialization from worldgen output.
+// Genesis: one-time world initialization from worldgen output.
 import { BuildingKind, EventType, Good, GOOD_COUNT, Race, RACE_NAMES, WorldConfig, DiploState } from '../shared/types';
 import { SimState, createEmptyState, Settlement, Faction, NamedCharacter, pairKey } from './state';
 import { generateWorld } from './world/worldgen';

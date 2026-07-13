@@ -1,5 +1,5 @@
 // Settlement flow fields (03 §Movement): cost-weighted Dijkstra from the
-// settlement center over a windowed region. Pure function of (map, center) —
+// settlement center over a windowed region. Pure function of (map, center);
 // cached outside SimState, recomputable, so determinism is unaffected.
 import { SimState, Settlement } from '../state';
 import { WorldMap, isPassable, moveCost } from './map';

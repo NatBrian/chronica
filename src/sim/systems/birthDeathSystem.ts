@@ -1,4 +1,4 @@
-// System 10 — procreation, starvation, aging out (03 §Lifecycle).
+// System 10: procreation, starvation, aging out (03 §Lifecycle).
 // Anti-extinction-spiral: birth rate dips before deaths spike (soft feedback).
 import { EventType, TICKS_PER_YEAR } from '../../shared/types';
 import { RACE_TABLE } from '../raceData';
@@ -16,7 +16,7 @@ export function birthDeathSystem(s: SimState): void {
   for (let i = 0; i < s.pawnCount; i++) {
     if (!(p.flags[i] & PawnFlag.Alive)) continue;
 
-    // ---- death by damage (starvation / cold — cause from dominant need) ----
+    // ---- death by damage (starvation / cold; cause from dominant need) ----
     if (p.hp[i] === 0) {
       const cause = p.shelter[i] >= 200 ? 'cold' : p.hunger[i] >= 240 ? 'starvation' : 'combat';
       killPawn(s, i, cause);

@@ -45,7 +45,7 @@ describe('D-class edge cases', () => {
     // raze the destination while the caravan travels
     razeSettlement(s, dst.id, 3);
     sim.runYears(2);
-    // caravan resolved (rerouted or returned) — goods not vaporized silently:
+    // caravan resolved (rerouted or returned); goods not vaporized silently:
     const c = s.caravans.find(cv => cv.id === 9999);
     expect(!c || c.state !== 'travel' || !s.settlements[c.to].razed).toBe(true);
   });

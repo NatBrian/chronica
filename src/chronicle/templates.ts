@@ -1,4 +1,4 @@
-// Template chapters (05): the LLM-less fallback — dry but factual and
+// Template chapters (05): the LLM-less fallback; dry but factual and
 // readable. Also used when the validator rejects twice.
 import { WorldEvent, TICKS_PER_YEAR, ChronicleChapter, ChronicleAnchor } from '../shared/types';
 import { ChapterDraft } from './detector';

@@ -57,7 +57,7 @@ function promotionPhrase(role: string): string {
     case 'founder': return 'leads settlers into the wilds.';
     case 'survivor': return 'alone walks out of the ashes.';
     case 'heir': return 'is presented to the court as heir.';
-    case 'prodigy': return 'is spoken of in every hall — a rare talent.';
+    case 'prodigy': return 'is spoken of in every hall; a rare talent.';
     default: return 'rises to prominence.';
   }
 }

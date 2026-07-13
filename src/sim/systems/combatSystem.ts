@@ -1,5 +1,5 @@
-// System 9 — squads, battles, morale, rout contagion, leader-death shock,
-// automatic defense (never decision-gated — 04 §War / 05 §Latency fairness).
+// System 9: squads, battles, morale, rout contagion, leader-death shock,
+// automatic defense (never decision-gated; 04 §War / 05 §Latency fairness).
 import { ActionId, EventType, Good, DiploState } from '../../shared/types';
 import { SimState, PawnFlag, Squad, pairKey } from '../state';
 import { RACE_TABLE } from '../raceData';
@@ -99,7 +99,7 @@ export function combatSystem(s: SimState): void {
         const enemy = findEngagement(s, sq);
         if (enemy) { engage(s, sq, enemy); }
         else if (!anyThreatNear(s, sq)) {
-          sq.state = 'disband';                            // threat gone — go home
+          sq.state = 'disband';                            // threat gone; go home
         }
         break;
       }
@@ -165,7 +165,7 @@ function setSoldierTarget(s: SimState, m: number, x: number, y: number): void {
 }
 
 function moveBanner(s: SimState, sq: Squad, tx: number, ty: number): void {
-  // armies move at pawn speed — 1 tile/tick on the route
+  // armies move at pawn speed; 1 tile/tick on the route
   const N = s.map.size;
   // inside the destination settlement's flow-field window → follow the field
   // (banners never jam in mountain country; same fix as pawn movement)
@@ -226,7 +226,7 @@ function marchColumn(s: SimState, sq: Squad): void {
   }
 }
 
-/** Battle joined — the event feed learns armies met (chronicle anchor). */
+/** Battle joined; the event feed learns armies met (chronicle anchor). */
 function engage(s: SimState, a: Squad, b: Squad): void {
   if (a.state === 'fight' && b.state === 'fight') return;
   a.state = 'fight'; b.state = 'fight';
@@ -277,7 +277,7 @@ function battleRound(s: SimState, a: Squad, b: Squad): void {
   const casualtiesOnB = applyCasualties(s, b, ((powerA / 300) | 0) + (rng.chance(powerA % 300, 300) ? 1 : 0), rng);
   const casualtiesOnA = applyCasualties(s, a, ((powerB / 300) | 0) + (rng.chance(powerB % 300, 300) ? 1 : 0), rng);
 
-  // morale: casualties + leader-death shock (03) — rout cascades below
+  // morale: casualties + leader-death shock (03); rout cascades below
   a.morale = Math.max(0, a.morale - casualtiesOnA.count * 9 - (casualtiesOnA.namedDied ? 60 : 0));
   b.morale = Math.max(0, b.morale - casualtiesOnB.count * 9 - (casualtiesOnB.namedDied ? 60 : 0));
 
@@ -291,11 +291,11 @@ function battleRound(s: SimState, a: Squad, b: Squad): void {
   }
 
   for (const [sq, other] of [[a, b], [b, a]] as const) {
-    // rout on broken morale OR 40% losses — small hosts break, not evaporate
+    // rout on broken morale OR 40% losses; small hosts break, not evaporate
     const broken = sq.morale < 80 || sq.members.length * 10 < sq.startSize * 6;
     if (broken && sq.state !== 'rout') {
       sq.state = 'rout';
-      // a beaten army licks its wounds — no instant re-muster treadmill,
+      // a beaten army licks its wounds; no instant re-muster treadmill,
       // and lost battles drain the will to fight (04: wars END)
       if (w) {
         w.musterCooldownUntil = Math.max(w.musterCooldownUntil ?? 0, s.tick + 320);
@@ -315,7 +315,7 @@ function battleRound(s: SimState, a: Squad, b: Squad): void {
         x: sq.x, y: sq.y,
         causes: w ? w.causeEventIds.slice(0, 1) : [],
         severity: 3,
-        text: `Y${yearOf(s.tick)}: Battle near ${nearestPlaceName(s, sq.x, sq.y)} — the ${s.factions[sq.factionId].name} line breaks and runs.`,
+        text: `Y${yearOf(s.tick)}: Battle near ${nearestPlaceName(s, sq.x, sq.y)}; the ${s.factions[sq.factionId].name} line breaks and runs.`,
       });
       // war hero promotion: strongest survivor of the winning side
       promoteHero(s, other, battleEv.id);
@@ -414,7 +414,7 @@ function resolveObjective(s: SimState, sq: Squad): void {
           s.pawns.action[i] = ActionId.Flee;
           s.pawns.flags[i] |= PawnFlag.Refugee;
         } else {
-          s.pawns.factionId[i] = w.attacker;                // assimilated — last resort
+          s.pawns.factionId[i] = w.attacker;                // assimilated; last resort
         }
       }
       adjustLedger(s, w.defender, w.attacker, -5, `${target.name} taken`);

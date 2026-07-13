@@ -54,7 +54,7 @@ describe('M5: the chronicle', () => {
 
   it('validator rejects invented entities and wrong years, passes honest prose', () => {
     const facts = [
-      { id: 1, tick: 3600, type: 0, actors: [], factions: [0, 1], x: 10, y: 10, causes: [], severity: 4, text: 'Y10: Millford Kingdom declares war on Elmwood Court — grain refused.' },
+      { id: 1, tick: 3600, type: 0, actors: [], factions: [0, 1], x: 10, y: 10, causes: [], severity: 4, text: 'Y10: Millford Kingdom declares war on Elmwood Court; grain refused.' },
     ] as any;
     const known = chapterKnownNames(facts, ['Aldric Greenfield'], ['Millford Kingdom', 'Elmwood Court'], ['Millford', 'Elmwood'], ['Solen'], 'Wynost');
     // honest prose

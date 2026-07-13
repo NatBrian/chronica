@@ -1,4 +1,4 @@
-// System 1 — season/year rollover + yearly stats collection.
+// System 1: season/year rollover + yearly stats collection.
 import { TICKS_PER_YEAR, Season, TICKS_PER_SEASON } from '../../shared/types';
 import { SimState, PawnFlag, YearStats } from '../state';
 

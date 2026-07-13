@@ -1,4 +1,4 @@
-// SimState — the entire deterministic world state. Two-tier storage (01):
+// SimState: the entire deterministic world state. Two-tier storage (01):
 // hot pawn data in flat typed arrays; story data (named chars, factions,
 // settlements) in rich objects serialized as sorted JSON.
 import {
@@ -23,7 +23,7 @@ export interface Pawns {
   safety: Uint8Array;         // fear accumulator
   social: Uint8Array;
   mood: Uint8Array;           // derived
-  age: Uint16Array;           // ticks / 4 (so 120y fits) — see AGE_SCALE
+  age: Uint16Array;           // ticks / 4 (so 120y fits); see AGE_SCALE
   factionId: Uint8Array;      // 255 = none
   settlementId: Uint16Array;  // 65535 = none
   action: Uint8Array;
@@ -87,7 +87,7 @@ export interface Settlement {
   lodStatistical: boolean;
   /** cached advertised resource tiles, refreshed periodically (03 smart-world) */
   resourceTiles: { forage: number[]; hunt: number[]; fish: number[]; wood: number[]; mine: number[]; stone: number[] };
-  /** farmable tiles (fert ≥ 55) within working radius — carrying-capacity base */
+  /** farmable tiles (fert ≥ 55) within working radius; carrying-capacity base */
   fertileLand: number;
 }
 
@@ -111,7 +111,7 @@ export interface War {
   causeEventIds: number[];
   targetSettlement: number;
   bothAggressors?: boolean;   // D4 mutual declaration
-  musterCooldownUntil?: number; // campaigns pace out — no raid conveyor
+  musterCooldownUntil?: number; // campaigns pace out; no raid conveyor
 }
 
 export interface Faction {
@@ -219,7 +219,7 @@ export interface SimState {
   pawns: Pawns;
   pawnCount: number;          // high-water mark for iteration
   alivePawns: number;
-  birthsDeferred: number;     // F1 — births deferred while arrays full
+  birthsDeferred: number;     // F1; births deferred while arrays full
   settlements: Settlement[];
   factions: Faction[];
   pairs: FactionPairState[];  // indexed pairKey(a,b)
@@ -246,7 +246,7 @@ export interface SimState {
 }
 
 /** Effective food security: stock plus weighted trend. A full granary with
- * zero production is NOT wealth — the flow term sees the trajectory. */
+ * zero production is NOT wealth; the flow term sees the trajectory. */
 export function effFood(st: Settlement): number {
   return Math.max(0, st.foodPerCapitaAvg + 2 * st.foodFlowAvg);
 }
@@ -363,7 +363,7 @@ export function restore(s: SimState, snap: Snapshot): void {
   });
 }
 
-/** FNV-1a over all buffers + json — the determinism tripwire. */
+/** FNV-1a over all buffers + json; the determinism tripwire. */
 export function hashState(s: SimState): number {
   const snap = snapshot(s);
   let h = 0x811c9dc5;

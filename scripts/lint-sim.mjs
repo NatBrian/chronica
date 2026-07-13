@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Determinism lint — ground rules 1 & 2 of docs/08-roadmap.md.
+// Determinism lint: ground rules 1 & 2 of docs/08-roadmap.md.
 // Bans nondeterminism sources in /src/sim and imports from render/ui/brain.
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
@@ -8,9 +8,9 @@ const SIM_DIR = new URL('../src/sim', import.meta.url).pathname;
 const ROOT = new URL('..', import.meta.url).pathname;
 
 const BANNED = [
-  { re: /\bMath\.random\b/, why: 'Math.random banned in /sim — use seeded Rng streams' },
-  { re: /\bDate\.now\b/, why: 'Date.now banned in /sim — time is tick count' },
-  { re: /\bnew Date\b/, why: 'Date banned in /sim — time is tick count' },
+  { re: /\bMath\.random\b/, why: 'Math.random banned in /sim; use seeded Rng streams' },
+  { re: /\bDate\.now\b/, why: 'Date.now banned in /sim; time is tick count' },
+  { re: /\bnew Date\b/, why: 'Date banned in /sim; time is tick count' },
   { re: /\bperformance\.now\b/, why: 'performance.now banned in /sim' },
   { re: /\bsetTimeout\b|\bsetInterval\b/, why: 'timers banned in /sim' },
   { re: /from\s+['"][^'"]*\/(render|ui|brain)\//, why: '/sim must not import render/ui/brain' },

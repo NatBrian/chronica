@@ -1,4 +1,4 @@
-// Brain adapter interface (05) — all client-side, provider-agnostic.
+// Brain adapter interface (05): all client-side, provider-agnostic.
 // LLM output NEVER touches the sim directly: it becomes a journal entry.
 import { DecisionRequest, DecisionResult } from '../shared/types';
 

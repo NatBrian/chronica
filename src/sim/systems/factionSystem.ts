@@ -1,4 +1,4 @@
-// System 11 — faction layer: succession, diplomacy upkeep, grudge decay,
+// System 11: faction layer: succession, diplomacy upkeep, grudge decay,
 // council/crisis decision requests, war campaigns (muster), expansion,
 // vassal tribute, rebellion. All decisions flow through the rule engine.
 import { DiploState, EventType, Good, TICKS_PER_YEAR } from '../../shared/types';
@@ -63,7 +63,7 @@ export function factionSystem(s: SimState): void {
   if (s.tick % 15 === 5) {
     for (const w of s.wars) {
       manageCampaign(s, w.attacker, w);
-      // passive exhaustion — wars end, they don't grind forever (04)
+      // passive exhaustion; wars end, they don't grind forever (04)
       w.exhaustionA += 1;
       w.exhaustionB += 1;
       if (w.exhaustionA > 400 || w.exhaustionB > 400) {
@@ -120,7 +120,7 @@ function maintainDiplomacy(s: SimState, f: Faction): void {
     }
 
     // border friction (02 §shared frontier): close settlements breed disputes
-    // (allies quarrel too, just less — alliances are not eternal peace)
+    // (allies quarrel too, just less; alliances are not eternal peace)
     if (pair.diplo >= DiploState.Neutral) {
       const frictionOdds = pair.diplo === DiploState.Alliance ? 8 : 3;
       let closest = Infinity;
@@ -144,7 +144,7 @@ function maintainDiplomacy(s: SimState, f: Faction): void {
         emitEvent(s, {
           type: EventType.GrudgeFormed, factions: [f.id, o.id],
           x: fx, y: fy, severity: 2,
-          text: `Y${yearOf(s.tick)}: Bad blood between ${f.name} and ${o.name} — ${why}.`,
+          text: `Y${yearOf(s.tick)}: Bad blood between ${f.name} and ${o.name}; ${why}.`,
         });
       }
     }
@@ -175,7 +175,7 @@ function checkSuccession(s: SimState, f: Faction): void {
     newKingPawn = best;
   }
   if (newKingPawn < 0) {
-    // no successor — the faction dissolves (D1)
+    // no successor; the faction dissolves (D1)
     f.extinct = true;
     emitEvent(s, {
       type: EventType.FactionDissolved, factions: [f.id], severity: 4,
@@ -238,7 +238,7 @@ function manageCampaign(s: SimState, attackerId: number, w: import('../state').W
     w.targetSettlement = alt.id;
     target = alt;
   }
-  // muster from capital (conscription shifts the job mix — 04)
+  // muster from capital (conscription shifts the job mix; 04)
   const home = s.settlements[f.capital] && !s.settlements[f.capital].razed
     ? s.settlements[f.capital]
     : s.settlements.find(st => !st.razed && st.factionId === attackerId);
@@ -283,7 +283,7 @@ function considerExpansion(s: SimState, f: Faction): void {
   const rng = s.rng.get('expansion');
   let best: [number, number] | null = null;
   let bestScore = 0;
-  // 16-direction integer table ×1000 — Math.sin/cos are engine-dependent (01)
+  // 16-direction integer table ×1000; Math.sin/cos are engine-dependent (01)
   const DIR16: readonly (readonly [number, number])[] = [
     [1000, 0], [924, 383], [707, 707], [383, 924], [0, 1000], [-383, 924],
     [-707, 707], [-924, 383], [-1000, 0], [-924, -383], [-707, -707],
@@ -350,7 +350,7 @@ function foundSettlement(s: SimState, f: Faction, from: Settlement, x: number, y
     if (s.pawns.squadId[i] !== 65535 || s.pawns.namedId[i] >= 0) continue;
     s.pawns.settlementId[i] = st.id;
     s.pawns.actionTarget[i] = y * N + x;
-    s.pawns.action[i] = 20;   // SettleNewVillage — walks to the new home
+    s.pawns.action[i] = 20;   // SettleNewVillage; walks to the new home
     s.pawns.actionTicks[i] = 2;
     if (founderPawn < 0) founderPawn = i;
     moved++;
@@ -385,7 +385,7 @@ function checkRebellion(s: SimState, f: Faction): void {
     }
     return;
   }
-  // settlement rebellion → faction split (bigness rots — 04)
+  // settlement rebellion → faction split (bigness rots; 04)
   if (s.factions.filter(x => !x.extinct).length >= MAX_FACTIONS) return;
   const mySettlements = s.settlements.filter(st => !st.razed && st.factionId === f.id);
   if (mySettlements.length < 3) return;

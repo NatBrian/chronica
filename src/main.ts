@@ -1,4 +1,4 @@
-// App entry — landing, worker boot, render loop, camera input, time machine UI,
+// App entry: landing, worker boot, render loop, camera input, time machine UI,
 // autosave, journal export/import, multi-tab lock (F4).
 // Dev tools: ?dev=seeds / ?dev=layers&seed=N / ?dev=sprites.
 import { Renderer } from './render/renderer';
@@ -50,12 +50,12 @@ function bootApp(): void {
 
   fetch('http://localhost:11434/api/tags', { signal: AbortSignal.timeout(1500) })
     .then(r => r.json())
-    .then(() => { llmStatus.textContent = '✓ Local LLM found — kings will think.'; })
+    .then(() => { llmStatus.textContent = '✓ Local LLM found: kings will think.'; })
     .catch(() => {
       const hasKey = !!loadByoConfig();
       llmStatus.innerHTML = hasKey
-        ? '✓ API key set — kings will think (BYO key).'
-        : 'No local LLM — kings will rule by instinct. (ollama + OLLAMA_ORIGINS=* enables thinking kings, or <a href="#" id="byok-link" style="color:#639bff">use an API key</a>)';
+        ? '✓ API key set: kings will think (BYO key).'
+        : 'No local LLM: kings will rule by instinct. (ollama + OLLAMA_ORIGINS=* enables thinking kings, or <a href="#" id="byok-link" style="color:#639bff">use an API key</a>)';
       document.getElementById('byok-link')?.addEventListener('click', (e) => {
         e.preventDefault();
         const provider = (prompt('Provider: "openrouter" or "anthropic"?', 'openrouter') ?? '').trim() as 'openrouter' | 'anthropic';
@@ -65,7 +65,7 @@ function bootApp(): void {
         const model = (prompt('Model id:', provider === 'anthropic' ? 'claude-haiku-4-5-20251001' : 'meta-llama/llama-3.3-70b-instruct') ?? '').trim();
         if (!model) return;
         saveByoConfig({ provider, apiKey, model });
-        llmStatus.textContent = '✓ API key saved — kings will think (BYO key).';
+        llmStatus.textContent = '✓ API key saved: kings will think (BYO key).';
       });
     });
 
@@ -91,7 +91,7 @@ function bootApp(): void {
       const b = document.createElement('button');
       b.className = 'ctl';
       b.style.margin = '3px';
-      b.textContent = `${rec.islandName} — Year ${Math.floor(rec.tick / TICKS_PER_YEAR)} (seed ${rec.seed})`;
+      b.textContent = `${rec.islandName}: Year ${Math.floor(rec.tick / TICKS_PER_YEAR)} (seed ${rec.seed})`;
       b.addEventListener('click', async () => {
         const store = new SaveStore(idb, `world:${rec.seed}`);
         const valid = await store.loadLatestValid();
@@ -163,7 +163,7 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
     await brainQueue.start();
   })();
 
-  // F4: Web Locks — second tab opening any world is read-only
+  // F4: Web Locks; second tab opening any world is read-only
   if (navigator.locks) {
     navigator.locks.request('chronica-world', { ifAvailable: true }, async lock => {
       if (!lock) {
@@ -189,7 +189,7 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
       case 'ready': {
         renderer.setMap(msg.map as RenderMapData);
         hudIsland.textContent = msg.islandName;
-        document.title = `Chronica — ${msg.islandName}`;
+        document.title = `Chronica: ${msg.islandName}`;
         worldSeed = msg.header.seed;
         saveStore = new SaveStore(idb, `world:${worldSeed}`);
         bakeMinimap();
@@ -356,7 +356,7 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
   }, { passive: false });
   window.addEventListener('resize', () => { renderer.resize(); sizeTimeline(); });
 
-  // ---- timeline (the marquee — 07) ----
+  // ---- timeline (the marquee: 07) ----
   const tl = document.getElementById('timeline') as HTMLCanvasElement;
   const tlTip = document.getElementById('tl-tooltip')!;
   function sizeTimeline(): void {
@@ -623,7 +623,7 @@ ${parts.join('\n')}</body>`;
     URL.revokeObjectURL(a.href);
   }
 
-  // chronicler LLM lane: low priority — write only while the kings' queue idles
+  // chronicler LLM lane: low priority; write only while the kings' queue idles
   async function narrateChapter(msg: any): Promise<void> {
     narrateBacklog.push(msg);
     void pumpNarration();
@@ -688,7 +688,7 @@ ${parts.join('\n')}</body>`;
     for (const c of searchIndex.characters) {
       if (!c.name.toLowerCase().includes(q)) continue;
       results.push({
-        label: `${c.name}${c.dead ? ' †' : ''} — ${c.role}, ${c.faction}${c.lineage ? ` · line of ${c.lineage}` : ''}${c.kills > 2 ? ` · ${c.kills} kills` : ''}`,
+        label: `${c.name}${c.dead ? ' †' : ''}, ${c.role}, ${c.faction}${c.lineage ? ` · line of ${c.lineage}` : ''}${c.kills > 2 ? ` · ${c.kills} kills` : ''}`,
         kind: 'character',
         act: () => {
           if (!c.dead && c.x >= 0) { renderer.camera.cx = c.x; renderer.camera.cy = c.y; renderer.camera.level = 2; worker.postMessage({ t: 'inspect', x: c.x, y: c.y }); }
@@ -699,14 +699,14 @@ ${parts.join('\n')}</body>`;
     for (const p of searchIndex.places) {
       if (!p.name.toLowerCase().includes(q)) continue;
       results.push({
-        label: `${p.name}${p.razed ? ' (ruins)' : ''} — ${p.faction}`,
+        label: `${p.name}${p.razed ? ' (ruins)' : ''}, ${p.faction}`,
         kind: 'place',
         act: () => { renderer.camera.cx = p.x; renderer.camera.cy = p.y; renderer.camera.level = 2; },
       });
     }
     for (const c of searchIndex.chapters) {
       if (!c.title.toLowerCase().includes(q) && !c.era.toLowerCase().includes(q)) continue;
-      results.push({ label: `${c.title} — ${c.era}`, kind: 'chapter', act: () => openChronicle(c.id) });
+      results.push({ label: `${c.title}: ${c.era}`, kind: 'chapter', act: () => openChronicle(c.id) });
     }
     for (const ev of searchIndex.events) {
       if (!ev.text.toLowerCase().includes(q)) continue;
@@ -951,7 +951,7 @@ ${parts.join('\n')}</body>`;
     a.click();
   }
 
-  // ---- A1: background tab — sim continues at 1× (deliberate default) ----
+  // ---- A1: background tab; sim continues at 1× (deliberate default) ----
   let prePauseSpeed = 0;
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) {

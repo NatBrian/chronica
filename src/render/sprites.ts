@@ -76,7 +76,7 @@ const BODY: Record<Race, string[]> = {
   ],
 };
 
-// Job accessory overlays (same 8×12 grid) — drawn after body
+// Job accessory overlays (same 8×12 grid); drawn after body
 const ACCESSORY: Record<string, string[]> = {
   farmer: [
     '......b.',
@@ -167,7 +167,7 @@ function drawTemplate(
       if (scale === 1) {
         px(data, ox + x, oy + y, DB32_RGB[slot]);
       } else {
-        // child: 70% — skip every 3rd row/col for a squatter tiny figure
+        // child: 70%; skip every 3rd row/col for a squatter tiny figure
         const cx = Math.floor(x * 0.7), cy = Math.floor(y * 0.7) + 4;
         px(data, ox + cx + 1, oy + cy, DB32_RGB[slot]);
       }

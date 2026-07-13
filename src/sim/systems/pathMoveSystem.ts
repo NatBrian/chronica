@@ -1,5 +1,5 @@
-// System 7 — movement (03 §Movement & pathfinding).
-// Fast path: greedy 8-dir steps. When greedy jams (concave terrain — dwarf
+// System 7: movement (03 §Movement & pathfinding).
+// Fast path: greedy 8-dir steps. When greedy jams (concave terrain; dwarf
 // country), fall back to the settlement flow field: descend to center, then
 // walk the Dijkstra chain out to the target. Guaranteed arrival in-region.
 import { ActionId } from '../../shared/types';

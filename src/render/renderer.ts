@@ -1,4 +1,4 @@
-// Canvas2D renderer — layers: terrain → water → buildings → pawns → effects
+// Canvas2D renderer: layers: terrain → water → buildings → pawns → effects
 // → overlays → markers (06). M0: terrain + camera. Later layers slot in.
 import { Camera } from './camera';
 import { TerrainCache, RenderMapData, CHUNK_TILES } from './terrain';

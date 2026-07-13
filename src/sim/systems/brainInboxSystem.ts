@@ -1,7 +1,7 @@
-// System 5 — apply journaled decisions at their scheduled tick (01).
+// System 5: apply journaled decisions at their scheduled tick (01).
 // Dead-actor voiding, uniform decision window, deterministic deadline
 // fallback: if no journal entry exists for a due request, RuleBrain decides
-// and the entry is appended — live runs and replays are bit-identical.
+// and the entry is appended; live runs and replays are bit-identical.
 import { JournalEntry } from '../../shared/types';
 import { SimState } from '../state';
 import { SystemCtx } from './index';
@@ -18,7 +18,7 @@ export function brainInboxSystem(s: SimState, ctx: SystemCtx): void {
     // find the journal entry for this request (host may have appended one)
     let entry = ctx.journal.entries.find(e => e.requestId === req.requestId);
     if (!entry) {
-      // deadline fallback — synthesized deterministically, journaled (05 §2)
+      // deadline fallback: synthesized deterministically, journaled (05 §2)
       const result = ruleBrainDecide(s, req);
       entry = {
         seq: ctx.journal.entries.length,
@@ -41,7 +41,7 @@ export function brainInboxSystem(s: SimState, ctx: SystemCtx): void {
     const choiceValid = req.options.includes(entry.choice);
 
     if (!actorValid || !choiceValid) {
-      entry.void = true;                 // stays in journal — replay-identical
+      entry.void = true;                 // stays in journal; replay-identical
     } else {
       applyDecision(s, entry);
       // coverage bookkeeping (05 fairness): llm vs fallback per faction

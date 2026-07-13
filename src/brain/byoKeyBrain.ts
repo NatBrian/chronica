@@ -1,4 +1,4 @@
-// BYO-API-key adapter (05): OpenRouter / Anthropic — CORS-enabled browser
+// BYO-API-key adapter (05): OpenRouter / Anthropic; CORS-enabled browser
 // calls, key in localStorage only. Gives GPU-less users thinking kings.
 import { DecisionRequest, DecisionResult } from '../shared/types';
 import { Brain, decisionPrompt, validateResult } from './brain';

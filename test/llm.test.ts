@@ -39,12 +39,12 @@ describe('M4: journaled kings', () => {
     }
     expect(llmAnswered).toBeGreaterThan(0);
     expect(live.journal.entries.some(e => e.source === 'ollama')).toBe(true);
-    // replay: no brain host attached — decisions come from the journal alone
+    // replay: no brain host attached; decisions come from the journal alone
     const replayed = Sim.replay(live.journal, live.state.tick);
     expect(replayed.hash()).toBe(live.hash());
   });
 
-  it('L1: one pending per actor — crisis supersedes council', () => {
+  it('L1: one pending per actor; crisis supersedes council', () => {
     const sim = Sim.fresh(3, CFG);
     sim.runYears(2);
     const s = sim.state;
@@ -77,7 +77,7 @@ describe('M4: journaled kings', () => {
     expect(isLate).toBe(true);   // would be discarded, journal unchanged
   });
 
-  it('L3: circuit breaker — 3 consecutive failures → instinct mode', async () => {
+  it('L3: circuit breaker; 3 consecutive failures → instinct mode', async () => {
     let calls = 0;
     const failingBrain: Brain = {
       name: 'test',

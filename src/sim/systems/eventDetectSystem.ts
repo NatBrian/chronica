@@ -1,4 +1,4 @@
-// System 13 — event detection: famine, deforestation, festivals, promotions
+// System 13: event detection: famine, deforestation, festivals, promotions
 // (trait outlier, heir), settlement mood. Events feed the DAG + chronicle.
 import { EventType, TICKS_PER_YEAR, Season, Good, BuildingKind } from '../../shared/types';
 import { SimState, PawnFlag, effFood } from '../state';
@@ -40,7 +40,7 @@ export function eventDetectSystem(s: SimState): void {
     }
   }
 
-  // harvest festival (autumn, well-fed settlements) — piety & mood flavor
+  // harvest festival (autumn, well-fed settlements); piety & mood flavor
   if (s.tick % TICKS_PER_YEAR === 250 && seasonOf(s.tick) === Season.Autumn) {
     const rich = s.settlements.find(st => !st.razed && effFood(st) > 24000 && st.popCache > 40);
     if (rich) {
@@ -50,7 +50,7 @@ export function eventDetectSystem(s: SimState): void {
         type: EventType.Festival,
         factions: [rich.factionId],
         x: rich.x, y: rich.y, severity: 1,
-        text: `Y${yearOf(s.tick)}: ${rich.name} feasts in ${f.god}'s name — the harvest was kind.`,
+        text: `Y${yearOf(s.tick)}: ${rich.name} feasts in ${f.god}'s name; the harvest was kind.`,
       });
     }
   }
@@ -69,7 +69,7 @@ export function eventDetectSystem(s: SimState): void {
         });
       }
     }
-    // trait outlier: the destined commoner (03) — top-percentile young adult
+    // trait outlier: the destined commoner (03); top-percentile young adult
     if (s.namedActive < namedCap(s)) {
       let best = -1, bestVal = 205;   // only genuinely exceptional
       for (let i = 0; i < s.pawnCount; i++) {
@@ -90,7 +90,7 @@ export function eventDetectSystem(s: SimState): void {
     }
   }
 
-  // heir promotion: firstborn of a ruling king (03) — cheap scan monthly
+  // heir promotion: firstborn of a ruling king (03); cheap scan monthly
   if (s.tick % 30 === 21) {
     for (const f of s.factions) {
       if (f.extinct || f.leaderId < 0) continue;

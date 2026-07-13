@@ -60,7 +60,7 @@ export class BrainQueue {
   }
 
   /** Drop requests whose apply deadline already passed (fast-forward leaves
-   * a wake of stale requests; answering them wastes GPU — L2 discards anyway). */
+   * a wake of stale requests; answering them wastes GPU; L2 discards anyway). */
   prune(currentTick: number): void {
     this.queue = this.queue.filter(it => it.req.applyAtTick > currentTick + 5);
   }
@@ -103,7 +103,7 @@ export class BrainQueue {
       this.failures++;
       this.consecutiveFailures++;
       if (this.consecutiveFailures >= 3) {
-        // L3: circuit breaker — kings rule by instinct; probe in background
+        // L3: circuit breaker; kings rule by instinct; probe in background
         this.circuitOpen = true;
         this.queue = [];
         this.scheduleHealthProbe();

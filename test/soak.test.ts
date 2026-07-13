@@ -5,7 +5,7 @@ import { Sim } from '../src/sim/engine';
 import { Good, GOOD_COUNT } from '../src/shared/types';
 
 describe('500-year soak (08 testing contract)', () => {
-  it('seed 42: 500y — sane invariants throughout, world stays alive', () => {
+  it('seed 42: 500y; sane invariants throughout, world stays alive', () => {
     const sim = Sim.fresh(42, { mapSize: 192 });
     for (let block = 0; block < 10; block++) {
       sim.runYears(50);

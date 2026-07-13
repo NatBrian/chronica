@@ -1,4 +1,4 @@
-// System 12.5 — pressure injectors (04 §Monsters & 08 M6): boring-equilibrium
+// System 12.5: pressure injectors (04 §Monsters & 08 M6): boring-equilibrium
 // insurance. All seeded + state-triggered; wealth-targeted where the doc says
 // so (the dragon smells gold; plague rides the busiest roads).
 import { EventType, Good, TICKS_PER_YEAR, DiploState } from '../../shared/types';
@@ -21,7 +21,7 @@ export function injectorSystem(s: SimState): void {
     stepPlague(s);
   }
 
-  // ---- yearly injector scheduling (seeded — no 50y window event-free, 04) ----
+  // ---- yearly injector scheduling (seeded; no 50y window event-free, 04) ----
   if (s.tick % TICKS_PER_YEAR !== 77) return;
   const rng = s.rng.get('injectors');
   const year = yearOf(s.tick);

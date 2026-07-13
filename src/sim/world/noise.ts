@@ -1,5 +1,5 @@
 // Seeded 2D gradient noise + fBm + domain warp. Uses only IEEE-exact float ops
-// (+ - * / sqrt) and integer hashing — bit-identical across engines.
+// (+ - * / sqrt) and integer hashing; bit-identical across engines.
 import { Rng } from '../rng/rng';
 
 const GRAD: ReadonlyArray<readonly [number, number]> = [

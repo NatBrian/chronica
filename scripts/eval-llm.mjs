@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// LLM eval harness (05 §Eval harness) — run on demand against local ollama:
+// LLM eval harness (05 §Eval harness): run on demand against local ollama:
 //   node scripts/eval-llm.mjs [model]
 // Checks per fixture: valid choice, memory-grounded reasoning, length cap;
 // plus decision entropy across a repeated fixture (anti-first-option bias).
@@ -28,7 +28,7 @@ for (const race of ['orc', 'elf', 'dwarf', 'human']) {
     digest: fixture(race,
       ['Y31: they refused our grain tribute', 'Y29: my brother died raiding Elmwood', 'Y40: dwarves honored their trade pact'],
       [{ faction: 'Elmwood Court (1)', weight: 9, why: 'tribute refusals; brother slain' }],
-      { year: 43, season: 'autumn', foodStores: '4 months', armyStrength: 'strong', population: 300, settlements: 2, enemyEstimates: { 'Elmwood Court (1)': 'weaker than us' }, activeTreaties: [], recentEvents: ['Y42: Bad blood — an insult at a border market'] },
+      { year: 43, season: 'autumn', foodStores: '4 months', armyStrength: 'strong', population: 300, settlements: 2, enemyEstimates: { 'Elmwood Court (1)': 'weaker than us' }, activeTreaties: [], recentEvents: ['Y42: Bad blood; an insult at a border market'] },
       ['DECLARE_WAR(1)', 'DEMAND_TRIBUTE(1)', 'SEND_GIFT(1)', 'CONSOLIDATE']),
     expectMemoryGrounding: true,
   });
@@ -65,7 +65,7 @@ FIXTURES.push({
     ['TAKE_TRIBUTE', 'SHIFT_BORDER', 'VASSALIZE', 'RAZE']),
   expectMemoryGrounding: true,
 });
-// entropy probe: neutral council, run 6× — flag >50% single-action dominance
+// entropy probe: neutral council, run 6×; flag >50% single-action dominance
 const entropyFixture = fixture('human',
   ['Y80: a quiet decade of good harvests'],
   [],
@@ -138,7 +138,7 @@ for (const f of FIXTURES) {
   }
 }
 
-// entropy check — with the production mitigations (05 §Anti-repetition):
+// entropy check; with the production mitigations (05 §Anti-repetition):
 // self-history in the digest + per-request option shuffle
 const picks = {};
 const history = [];
@@ -158,7 +158,7 @@ for (let i = 0; i < 6; i++) {
 }
 const total = Object.values(picks).reduce((a, b) => a + b, 0);
 const maxShare = total ? Math.max(...Object.values(picks)) / total : 0;
-console.log(`entropy probe: ${JSON.stringify(picks)} — max share ${(maxShare * 100).toFixed(0)}%`);
+console.log(`entropy probe: ${JSON.stringify(picks)}; max share ${(maxShare * 100).toFixed(0)}%`);
 if (maxShare > 0.84) { fail++; console.log('✗ decision entropy: single action dominates'); }
 else pass++;
 

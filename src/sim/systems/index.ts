@@ -36,5 +36,5 @@ export const SYSTEMS: System[] = [
   (s) => injectorSystem(s),       // 12.5 pressure injectors (M6)
   (s) => eventDetectSystem(s),    // 13
   // 14 lodSystem        (M6)
-  // 15 snapshotSystem — keyframes handled by engine cadence
+  // 15 snapshotSystem; keyframes handled by engine cadence
 ];

@@ -1,4 +1,4 @@
-// Seeded PRNG — xoshiro128** with splitmix32 seeding. Pure 32-bit integer math.
+// Seeded PRNG: xoshiro128** with splitmix32 seeding. Pure 32-bit integer math.
 // Each system gets a named stream derived from (rootSeed, streamName) so adding
 // a random call in one system never shifts another system's sequence (01 §Determinism).
 
@@ -13,7 +13,7 @@ function splitmix32(seed: number): () => number {
   };
 }
 
-/** FNV-1a 32-bit string hash — for deriving stream seeds from names. */
+/** FNV-1a 32-bit string hash; for deriving stream seeds from names. */
 export function fnv1a(str: string, basis = 0x811c9dc5): number {
   let h = basis >>> 0;
   for (let i = 0; i < str.length; i++) {
@@ -43,7 +43,7 @@ export class Rng {
     return result;
   }
 
-  /** Integer in [0, n) — unbiased enough for sim purposes (n << 2^32). */
+  /** Integer in [0, n); unbiased enough for sim purposes (n << 2^32). */
   int(n: number): number {
     return n <= 0 ? 0 : this.u32() % n;
   }
@@ -53,12 +53,12 @@ export class Rng {
     return lo + this.int(hi - lo + 1);
   }
 
-  /** True with probability num/den (integer odds — no float branching). */
+  /** True with probability num/den (integer odds; no float branching). */
   chance(num: number, den: number): boolean {
     return this.int(den) < num;
   }
 
-  /** Float in [0,1) — ONLY for worldgen-time noise, never tick-time branching. */
+  /** Float in [0,1); ONLY for worldgen-time noise, never tick-time branching. */
   float(): number {
     return this.u32() / 4294967296;
   }

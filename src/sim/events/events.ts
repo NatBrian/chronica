@@ -30,7 +30,7 @@ export function emitEvent(s: SimState, opts: EmitOpts): WorldEvent {
   return ev;
 }
 
-/** Most recent events of given types involving a faction — for digests & causes. */
+/** Most recent events of given types involving a faction; for digests & causes. */
 export function recentEvents(s: SimState, factionId: number, sinceTicks: number, max = 8): WorldEvent[] {
   const out: WorldEvent[] = [];
   const cutoff = s.tick - sinceTicks;

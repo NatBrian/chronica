@@ -1,4 +1,4 @@
-// DB32 (DawnBringer-32) — public-domain 32-color palette (06 §Palette).
+// DB32 (DawnBringer-32): public-domain 32-color palette (06 §Palette).
 // Single source of truth; all sprites/terrain sample from these slots.
 export const DB32: readonly string[] = [
   '#000000', '#222034', '#45283c', '#663931', '#8f563b', '#df7126', '#d9a066', '#eec39a',
@@ -30,8 +30,8 @@ export const FACTION_RAMPS: readonly (readonly [number, number, number, number])
 
 /** Seasonal grading tints (r,g,b multipliers ×100). */
 export const SEASON_TINT: readonly (readonly [number, number, number])[] = [
-  [100, 104, 100], // spring — slightly lusher greens
-  [104, 102, 96],  // summer — warm
-  [106, 98, 90],   // autumn — warmed + browned
-  [92, 96, 108],   // winter — desaturated blue
+  [100, 104, 100], // spring; slightly lusher greens
+  [104, 102, 96],  // summer; warm
+  [106, 98, 90],   // autumn; warmed + browned
+  [92, 96, 108],   // winter; desaturated blue
 ];

@@ -1,4 +1,4 @@
-// System 6 — 3-layer action selection (03): reflexes → utility over advertised
+// System 6: 3-layer action selection (03): reflexes → utility over advertised
 // offers (IAUS curves, commitment, staggered 1/8) → idle.
 import { ActionId, BuildingKind, EventType, Good, Season } from '../../shared/types';
 import { PawnFlag, SimState, Settlement, effFood } from '../state';
@@ -37,7 +37,7 @@ export function refreshResourceTiles(s: SimState, st: Settlement): void {
     for (let dx = -R; dx <= R; dx++) {
       const x = st.x + dx, y = st.y + dy;
       if (x < 0 || y < 0 || x >= N || y >= N) continue;
-      if (fieldDist(field, x, y) === 65535) continue;   // unreachable — never advertise
+      if (fieldDist(field, x, y) === 65535) continue;   // unreachable; never advertise
       const i = y * N + x;
       const fert = s.map.fertility[i];
       if (fert > 75 && !(s.map.flags[i] & TileFlag.Farm)) found.forage.push([fert, i]);
@@ -80,7 +80,7 @@ export function refreshResourceTiles(s: SimState, st: Settlement): void {
 export interface ScoredOffer { action: ActionId; target: number; score: number; work: number }
 
 // ---- per-settlement shared offer cache (perf: one build per settlement per
-// tick instead of per pawn; flat arrays, no closures — 68% of tick cost fixed)
+// tick instead of per pawn; flat arrays, no closures; 68% of tick cost fixed)
 interface SharedOffers {
   tick: number;
   actions: number[];
@@ -194,7 +194,7 @@ function pickBest(s: SimState, i: number, st: Settlement): { action: number; tar
   return { action: bestAction, target: bestTarget, work: bestWork, score: bestScore };
 }
 
-/** All offers visible to pawn i, scored — exported for the inspector (03). */
+/** All offers visible to pawn i, scored; exported for the inspector (03). */
 export function scoreOffers(s: SimState, i: number): ScoredOffer[] {
   const p = s.pawns;
   const st = s.settlements[p.settlementId[i]];
@@ -222,20 +222,20 @@ export function scoreOffers(s: SimState, i: number): ScoredOffer[] {
 
   const totalFood = st.stockpile[Good.Grain] + st.stockpile[Good.Meat] + st.stockpile[Good.Fish];
 
-  // eat — granary advertises when stocked
+  // eat; granary advertises when stocked
   if (totalFood > 0) mk(ActionId.EatFromStockpile, centerTile, hungerCurve(p.hunger[i]) * 3, 1);
 
-  // rest — home advertises
+  // rest; home advertises
   mk(ActionId.Rest, centerTile, energyCurve(p.energy[i]) * 2, 3);
 
   if (!isChild) {
-    // gathering — payoff scales with settlement food scarcity (rolling avg signal)
+    // gathering; payoff scales with settlement food scarcity (rolling avg signal)
     const scarcity = Math.max(30, Math.min(260, 300 - ((effFood(st) / 100) | 0)));
     for (const t of st.resourceTiles.forage) mk(ActionId.Forage, t, scarcity + (s.map.fertility[t] >> 2), 4);
     for (const t of st.resourceTiles.hunt) mk(ActionId.Hunt, t, scarcity + (s.map.game[t] >> 2), 6);
     for (const t of st.resourceTiles.fish) mk(ActionId.Fish, t, scarcity + (s.map.fish[t] >> 2), 4);
 
-    // farming (M2): sow in spring/summer, harvest ripe — the food backbone
+    // farming (M2): sow in spring/summer, harvest ripe; the food backbone
     const season = seasonOf(s.tick);
     let sowShown = 0, harvestShown = 0;
     for (const plot of st.farmPlots) {
@@ -245,13 +245,13 @@ export function scoreOffers(s: SimState, i: number): ScoredOffer[] {
         harvestShown++;
       } else if (c === 0 && sowShown < 24 &&
                  (season === Season.Spring || (season === Season.Summer && s.tick % 90 < 45))) {
-        // no late-summer sowing — frost would take the crop before harvest
+        // no late-summer sowing; frost would take the crop before harvest
         mk(ActionId.FarmWork, plot, 130 + (scarcity >> 1), 3);
         sowShown++;
       }
     }
 
-    // wood/stone/ore economy (M2) — industry throttles when food is insecure:
+    // wood/stone/ore economy (M2): industry throttles when food is insecure:
     // a hungry village sends no miners (labor goes to the granary first)
     const industry = Math.max(25, Math.min(100, (effFood(st) / 250) | 0));
     const ind = (base: number) => (base * industry / 100) | 0;
@@ -276,14 +276,14 @@ export function scoreOffers(s: SimState, i: number): ScoredOffer[] {
         tile, ind(140 + (st.crowding >> 1)), 3);
     }
 
-    // craftEquipment — workshop with ore (04 dwarven smithing path)
+    // craftEquipment; workshop with ore (04 dwarven smithing path)
     if (hasWorkshop && st.stockpile[Good.Ore] >= 2 && wood >= 1) {
       const toolNeed = Math.max(20, 120 - st.stockpile[Good.Tools] * 2);
       const ws = st.buildings.find(b => b.kind === BuildingKind.Workshop && b.stage === 3)!;
       mk(ActionId.CraftEquipment, ws.y * s.map.size + ws.x, ind(toolNeed), 4);
     }
 
-    // court — low-pressure default for unpaired adults
+    // court; low-pressure default for unpaired adults
     if (p.pairId[i] < 0 && !(p.flags[i] & PawnFlag.Elder)) {
       mk(ActionId.Court, centerTile, socialCurve(p.social[i]), 2);
     }
@@ -326,7 +326,7 @@ export function utilityAISystem(s: SimState): void {
       // how many mouths can farms + hunting + fishing + foraging feed here?
       const rt = st.resourceTiles;
       // land-based, pop-independent: fertile tiles ≈ 1 mouth each (farming),
-      // plus sustainable hunt/fish/forage — no feedback through claimed plots
+      // plus sustainable hunt/fish/forage; no feedback through claimed plots
       const capacity = ((st.fertileLand * 9) / 10 | 0) + rt.hunt.length * 3 +
         rt.fish.length * 4 + rt.forage.length * 2 + 6;
       const crowdPct = (st.popCache * 100 / capacity) | 0;
@@ -369,7 +369,7 @@ export function utilityAISystem(s: SimState): void {
       }
     }
 
-    // ---- Layer 3: idle/ambient — wander near home ----
+    // ---- Layer 3: idle/ambient; wander near home ----
     if (st && !st.razed) {
       const rng = s.rng.get('idle');
       const wx = st.x + rng.int(13) - 6;

@@ -5,7 +5,7 @@ import { fnv1a } from '../sim/rng/rng';
 
 export interface SaveRecord {
   slot: number;
-  savedAt: number;          // wall clock ms (outside sim — allowed here)
+  savedAt: number;          // wall clock ms (outside sim; allowed here)
   seed: number;
   islandName: string;
   tick: number;
@@ -67,7 +67,7 @@ export class SaveStore {
     return out;
   }
 
-  /** Newest valid save; corrupt slots are skipped (fall back one slot — F2). */
+  /** Newest valid save; corrupt slots are skipped (fall back one slot: F2). */
   async loadLatestValid(): Promise<SaveRecord | null> {
     const all = await this.list();
     all.sort((a, b) => b.savedAt - a.savedAt);

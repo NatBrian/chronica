@@ -1,4 +1,4 @@
-// Sim Web Worker — hosts the deterministic Sim; render thread gets snapshots
+// Sim Web Worker: hosts the deterministic Sim; render thread gets snapshots
 // via transferable buffers (01). This file is NOT /src/sim (it may use timers).
 import { Sim } from './sim/engine';
 import { WorldConfig, defaultConfig, TICKS_PER_YEAR, JournalEntry, Journal, ACTION_NAMES, ChronicleChapter } from './shared/types';
@@ -56,7 +56,7 @@ function chronicleTick(): void {
     chronicle.nextChapterId = Math.max(chronicle.nextChapterId, draft.id + 1);
     const facts = draft.factIds.map(id => s.events.find(e => e.id === id)!).filter(Boolean);
     const title = draftTitle(draft, facts, factionNames);
-    // template chapter immediately — the book is never blank; LLM upgrades it
+    // template chapter immediately; the book is never blank; LLM upgrades it
     const chapter = templateChapter(draft, facts, title, currentEraName());
     chronicle.chapters.push(chapter);
     chronicle.drafts[draft.id] = draft;
@@ -148,7 +148,7 @@ function receiveProse(msg: { chapterId: number; title: string; paragraphs: strin
         retryNote: check.violations.join('; '),
       });
     }
-    // template stays — marked, honest (05: else template fallback)
+    // template stays; marked, honest (05: else template fallback)
     return;
   }
   // accepted: upgrade the stored chapter (anchors from facts, never prose)
@@ -164,7 +164,7 @@ function receiveProse(msg: { chapterId: number; title: string; paragraphs: strin
   chapter.source = 'llm';
   delete chronicle.drafts[msg.chapterId];
   postChronicle();
-  // written prose is content, not view — persist immediately (05: stored, never regenerated)
+  // written prose is content, not view; persist immediately (05: stored, never regenerated)
   forceAutosave();
 }
 
@@ -176,7 +176,7 @@ function post(msg: unknown, transfer?: Transferable[]): void {
 
 function mapPlanesMsg() {
   const m = sim!.state.map;
-  // copies (keep sim's own planes) — cheap at 512²
+  // copies (keep sim's own planes); cheap at 512²
   const planes = {
     size: m.size,
     biome: m.biome.slice(), elevation: m.elevation.slice(),
@@ -370,7 +370,7 @@ self.onmessage = (e: MessageEvent) => {
         Math.max(0, Math.floor(msg.year * TICKS_PER_YEAR)),
       );
       if (target < (presentPack ? presentTick : sim.state.tick) && !presentPack) {
-        // first scrub into the past — park the present (one world-line, 07)
+        // first scrub into the past; park the present (one world-line, 07)
         presentTick = sim.state.tick;
         presentPack = packSnapshot(snapshot(sim.state));
       }

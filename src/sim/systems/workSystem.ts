@@ -1,4 +1,4 @@
-// System 8 — action execution at target: gather, eat, rest, court.
+// System 8: action execution at target: gather, eat, rest, court.
 // Yields go straight to the settlement stockpile (hauling abstracted in M1).
 import { ActionId, BuildingKind, Good } from '../../shared/types';
 import { PawnFlag, SimState, effFood } from '../state';
@@ -17,7 +17,7 @@ export function workSystem(s: SimState): void {
     const tx = target % N, ty = (target / N) | 0;
     if (p.x[i] !== tx || p.y[i] !== ty) continue;          // still traveling
 
-    // arrived — sheltering actions set the flag immediately
+    // arrived; sheltering actions set the flag immediately
     if (action === ActionId.Rest || action === ActionId.SeekShelter) {
       p.flags[i] |= PawnFlag.InShelter;
     }
@@ -79,7 +79,7 @@ export function workSystem(s: SimState): void {
         if (st) {
           const c = s.map.crop[target];
           if (c >= 200) {
-            // harvest — terrain bonds (04): race bonus on home biome
+            // harvest; terrain bonds (04): race bonus on home biome
             let gain = (10 + (s.map.fertility[target] >> 3)) * rs.farmSkill / 100 | 0;
             if (rs.homeBiomes.includes(s.map.biome[target])) gain = (gain * 135 / 100) | 0;
             st.stockpile[Good.Grain] = Math.min(st.granaryCap, st.stockpile[Good.Grain] + gain);

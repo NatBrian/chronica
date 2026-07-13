@@ -1,4 +1,4 @@
-// System 3 — crop growth on farm plots (M2). Stages: 0 fallow, 1-199 growing,
+// System 3: crop growth on farm plots (M2). Stages: 0 fallow, 1-199 growing,
 // 200+ ripe. Sowing/harvest are pawn actions (workSystem); growth lives here.
 import { Season } from '../../shared/types';
 import { SimState } from '../state';

@@ -1,4 +1,4 @@
-// Balance stage 2 (04 §Engine fairness): mirror-match soak — 4 identical
+// Balance stage 2 (04 §Engine fairness): mirror-match soak; 4 identical
 // human factions. Surviving dominance pattern = map/engine bias.
 // CI runs a reduced matrix; scripts/soak.mjs runs the full 100 seeds.
 import { describe, it, expect } from 'vitest';

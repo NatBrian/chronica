@@ -1,4 +1,4 @@
-// System 2 — weather: yearly drought level + winter severity from seeded stream.
+// System 2: weather: yearly drought level + winter severity from seeded stream.
 // Injector-scheduled disasters (M6) also land here.
 import { EventType, TICKS_PER_YEAR } from '../../shared/types';
 import { SimState } from '../state';
@@ -27,7 +27,7 @@ export function weatherSystem(s: SimState): void {
     emitEvent(s, {
       type: EventType.HarshWinter, severity: 3,
       factions: [0, 1, 2, 3],
-      text: `Y${year}: Elders read the signs — the coming winter will be merciless.`,
+      text: `Y${year}: Elders read the signs; the coming winter will be merciless.`,
     });
   } else {
     s.weather.winterSeverity = w;

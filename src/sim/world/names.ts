@@ -1,4 +1,4 @@
-// Procedural per-culture name generators — phoneme tables (04 §Culture).
+// Procedural per-culture name generators; phoneme tables (04 §Culture).
 import { Race } from '../../shared/types';
 import { Rng } from '../rng/rng';
 

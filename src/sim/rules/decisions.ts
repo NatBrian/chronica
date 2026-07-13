@@ -1,6 +1,6 @@
 // Rule engine (05): computes legal decision options per situation, builds the
 // situation digest, and EXECUTES chosen options. The LLM (or RuleBrain) only
-// ever picks one string from the options list — rules do everything else.
+// ever picks one string from the options list; rules do everything else.
 import {
   DiploState, EventType, Good, RACE_NAMES, Season, TICKS_PER_YEAR,
   DecisionDigest, JournalEntry,
@@ -486,7 +486,7 @@ export function declareWar(
     factions: [attacker, defender],
     x: s.settlements[att.capital]?.x ?? 0, y: s.settlements[att.capital]?.y ?? 0,
     causes, severity: 4,
-    text: `Y${yearOf(s.tick)}: ${att.name} declares war on ${def.name} — ${why}.`,
+    text: `Y${yearOf(s.tick)}: ${att.name} declares war on ${def.name}: ${why}.`,
     data: { grudge },
   });
   s.wars.push({
@@ -581,7 +581,7 @@ export function queueDecision(
   }
 }
 
-/** Option order shuffled per request (anti-first-option-bias, 05) — seeded. */
+/** Option order shuffled per request (anti-first-option-bias, 05); seeded. */
 function shuffleOptions(s: SimState, options: string[]): string[] {
   return s.rng.get('optionShuffle').shuffle([...options]);
 }
@@ -604,14 +604,14 @@ function findPendingKind(s: SimState, entry: JournalEntry): string {
   return p ? p.kind.split(':')[0] : '';
 }
 
-/** Tribute/gift rides a physical caravan (05 execution notes) — no teleporting. */
+/** Tribute/gift rides a physical caravan (05 execution notes); no teleporting. */
 export function payTribute(s: SimState, from: number, to: number, purpose: 'tribute' | 'gift'): void {
   const src = s.settlements.find(st => !st.razed && st.factionId === from && st.id === s.factions[from].capital)
     ?? s.settlements.find(st => !st.razed && st.factionId === from);
   const dst = s.settlements.find(st => !st.razed && st.factionId === to && st.id === s.factions[to].capital)
     ?? s.settlements.find(st => !st.razed && st.factionId === to);
   if (!src || !dst) {
-    // D6: cannot pay ≠ will not pay — automatic distinct ledger event
+    // D6: cannot pay ≠ will not pay; automatic distinct ledger event
     adjustLedger(s, to, from, -1, 'tribute failed (could not pay)');
     emitEvent(s, {
       type: EventType.TributeFailed, factions: [from, to], severity: 2,
@@ -716,7 +716,7 @@ export function razeSettlement(s: SimState, settlementId: number, byFaction: num
       s.pawns.settlementId[i] = dest;
       s.pawns.factionId[i] = d.factionId;
       s.pawns.actionTarget[i] = d.y * N + d.x;
-      s.pawns.action[i] = 16; // Flee — walk to new home
+      s.pawns.action[i] = 16; // Flee; walk to new home
       s.pawns.flags[i] |= PawnFlag.Refugee;
       refugees++;
     } else {
