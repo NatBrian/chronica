@@ -15,6 +15,9 @@ let presentPack: ArrayBuffer | null = null;
 let presentTick = 0;
 let lastMajorCount = -1;
 let lastAutosaveDecade = 0;
+// request digests cached so council panel can show what the king saw (M4)
+const digestCache = new Map<number, { digest: unknown; options: string[]; kind: string }>();
+let lastJournalScan = 0;
 
 const SNAPSHOT_HZ = 20;
 
@@ -124,10 +127,39 @@ function loop(): void {
     }
   }
   const reqs = sim.takeRequests();
+  for (const r of reqs) {
+    digestCache.set(r.requestId, { digest: r.digest, options: r.options, kind: r.kind });
+    if (digestCache.size > 60) {
+      const oldest = digestCache.keys().next().value as number;
+      digestCache.delete(oldest);
+    }
+  }
   if (reqs.length > 0 && !replayMode && !presentPack) post({ t: 'requests', requests: reqs });
+  notifyAppliedDecisions();
   maybeAutosave();
   maybeSendMajors();
   sendSnapshot();
+}
+
+/** Council panel feed: journal entries newly applied (or voided) this frame. */
+function notifyAppliedDecisions(): void {
+  if (!sim) return;
+  const tick = sim.state.tick;
+  for (const e of sim.journal.entries) {
+    if (e.applyAtTick <= lastJournalScan || e.applyAtTick > tick) continue;
+    if (e.void) continue;
+    const cached = digestCache.get(e.requestId);
+    post({
+      t: 'decisionApplied',
+      entry: e,
+      digest: cached?.digest ?? null,
+      options: cached?.options ?? [],
+      kind: cached?.kind ?? '',
+      actorName: sim.state.named[e.actorId]?.name ?? '?',
+      factionName: sim.state.factions[e.factionId]?.name ?? '?',
+    });
+  }
+  lastJournalScan = tick;
 }
 
 self.onmessage = (e: MessageEvent) => {
@@ -149,6 +181,7 @@ self.onmessage = (e: MessageEvent) => {
       }
       presentPack = null;
       lastMajorCount = -1;
+      lastJournalScan = sim.state.tick;
       post({
         t: 'ready',
         islandName: sim.state.islandName,
@@ -181,6 +214,7 @@ self.onmessage = (e: MessageEvent) => {
         presentPack = null;                        // seeked back to the live edge
       }
       lastMajorCount = -1;
+      lastJournalScan = sim.state.tick;
       post({ t: 'seeked', tick: sim.state.tick, inPast: presentPack !== null });
       maybeSendMajors();
       sendSnapshot();
@@ -191,13 +225,23 @@ self.onmessage = (e: MessageEvent) => {
       restore(sim.state, unpackSnapshot(presentPack));
       presentPack = null;
       lastMajorCount = -1;
+      lastJournalScan = sim.state.tick;
       post({ t: 'seeked', tick: sim.state.tick, inPast: false });
       maybeSendMajors();
       sendSnapshot();
       break;
     }
     case 'decision': {
-      sim?.submitDecision(msg.entry as JournalEntry);
+      if (!sim) break;
+      const e = msg.entry as JournalEntry;
+      // L2: late response (deadline fallback already fired) → discard + log
+      if (sim.state.tick >= e.applyAtTick ||
+          sim.journal.entries.some(j => j.requestId === e.requestId)) {
+        post({ t: 'decisionDiscarded', requestId: e.requestId });
+        break;
+      }
+      e.seq = sim.journal.entries.length;
+      sim.submitDecision(e);
       break;
     }
     case 'exportJournal': {

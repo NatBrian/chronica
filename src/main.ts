@@ -5,8 +5,12 @@ import { Renderer } from './render/renderer';
 import { RenderMapData } from './render/terrain';
 import { mountSeedBrowser, mountLayerViewer, mountSpritePreview } from './ui/devtools';
 import { bakePawnAtlas, actionToJob, SPRITE_W, SPRITE_H, PawnAtlas } from './render/sprites';
-import { TICKS_PER_YEAR, Journal } from './shared/types';
+import { TICKS_PER_YEAR, Journal, DecisionRequest, DecisionResult, JournalEntry } from './shared/types';
 import { SaveStore, IdbBackend, SaveRecord } from './shared/saveStore';
+import { Brain } from './brain/brain';
+import { OllamaBrain } from './brain/ollamaBrain';
+import { ByoKeyBrain, loadByoConfig } from './brain/byoKeyBrain';
+import { BrainQueue } from './brain/queue';
 
 const atlas: PawnAtlas = bakePawnAtlas();
 const idb = new IdbBackend();
@@ -99,6 +103,45 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
   let saveStore: SaveStore | null = null;
   let worldSeed = boot.seed ?? boot.resume?.seed ?? boot.journal?.header.seed ?? 0;
 
+  // ---- thinking kings: brain adapters + queue (M4) ----
+  const llmBadge = document.getElementById('llm-badge')!;
+  let brainQueue: BrainQueue | null = null;
+  (async () => {
+    let brain: Brain | null = null;
+    const ollama = new OllamaBrain();
+    if (await ollama.detectModel()) {
+      brain = ollama;
+    } else {
+      const byo = loadByoConfig();
+      if (byo) brain = new ByoKeyBrain(byo);
+    }
+    brainQueue = new BrainQueue(
+      brain,
+      (req, result: DecisionResult) => {
+        const entry: JournalEntry = {
+          seq: 0,   // worker assigns
+          requestId: req.requestId,
+          requestTick: req.tick,
+          applyAtTick: req.applyAtTick,
+          actorId: req.actorId,
+          factionId: req.factionId,
+          choice: result.choice,
+          reasoning: result.reasoning,
+          ...(result.newMemory ? { newMemory: result.newMemory } : {}),
+          source: brain?.name === 'byok' ? 'byok' : 'ollama',
+        };
+        worker.postMessage({ t: 'decision', entry });
+      },
+      (st) => {
+        llmBadge.textContent = st.mode === 'llm'
+          ? `👑 kings think (${st.brainName}, ~${(st.probeMs / 1000).toFixed(1)}s, ${st.quotaPerYear}/y)${st.inFlight ? ' · thinking…' : ''}`
+          : '👑 kings ruling by instinct';
+        llmBadge.title = `answered ${st.answered} · failures ${st.failures} · queued ${st.queued}`;
+      },
+    );
+    await brainQueue.start();
+  })();
+
   // F4: Web Locks — second tab opening any world is read-only
   if (navigator.locks) {
     navigator.locks.request('chronica-world', { ifAvailable: true }, async lock => {
@@ -135,6 +178,13 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
       case 'majorEvents': majors = msg.events; break;
       case 'feed': renderFeed(msg.events); break;
       case 'chain': renderChain(msg.chain); break;
+      case 'requests': {
+        for (const req of msg.requests as DecisionRequest[]) {
+          brainQueue?.enqueue(req, Math.floor(req.tick / TICKS_PER_YEAR));
+        }
+        break;
+      }
+      case 'decisionApplied': onDecisionApplied(msg); break;
       case 'inspection': showInspector(msg.pawn); break;
       case 'seeked': {
         seekStatus.style.display = 'none';
@@ -347,6 +397,65 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
     inspectorEl.style.display = 'block';
     document.getElementById('insp-close')!.addEventListener('click', () => {
       inspectorEl.style.display = 'none';
+    });
+  }
+
+  // ---- council panel + decision toasts (07 §4, shareable moment #1) ----
+  const councilPanel = document.getElementById('council-panel')!;
+  const toastStack = document.getElementById('toast-stack')!;
+  const recentDecisions: any[] = [];
+
+  function onDecisionApplied(msg: any): void {
+    recentDecisions.push(msg);
+    if (recentDecisions.length > 20) recentDecisions.shift();
+    const isWar = msg.entry.choice.startsWith('DECLARE_WAR') || msg.entry.choice === 'RAZE';
+    const isMajor = isWar || msg.entry.choice.startsWith('SUE_FOR_PEACE') ||
+      msg.entry.choice.startsWith('ALLY_AGAINST') || msg.kind === 'postWar';
+    // rate-limit: only toast notable decisions (or LLM ones)
+    if (!isMajor && msg.entry.source === 'fallback') return;
+    toast(
+      `${msg.actorName} has made a decision`,
+      msg.entry.choice.split('(')[0].replace(/_/g, ' ').toLowerCase(),
+      isWar,
+      () => showCouncil(msg),
+    );
+    // auto-pause on war declarations at 1× (07: default ON at 1×, OFF at 16×)
+    if (isWar && speed === 1 && !paused) {
+      paused = true; btnPause.textContent = '▶'; applySpeed();
+      showCouncil(msg);
+    }
+  }
+
+  function toast(title: string, sub: string, war: boolean, onClick: () => void): void {
+    const el = document.createElement('div');
+    el.className = `toast${war ? ' war' : ''}`;
+    el.innerHTML = `<b>${title}</b><br><span style="color:#9badb7">${sub}</span>`;
+    el.addEventListener('click', () => { onClick(); el.remove(); });
+    toastStack.appendChild(el);
+    setTimeout(() => el.remove(), 9000);
+    while (toastStack.children.length > 4) toastStack.firstChild?.remove();
+  }
+
+  function showCouncil(msg: any): void {
+    const d = msg.digest;
+    const e = msg.entry;
+    councilPanel.innerHTML = `
+      <span style="float:right;cursor:pointer;color:#9badb7" id="council-close">✕</span>
+      <h3>👑 ${msg.actorName}</h3>
+      <div class="sub">${msg.factionName} · Year ${Math.floor(e.applyAtTick / TICKS_PER_YEAR)} · ${msg.kind.split(':')[0] || 'council'}</div>
+      ${d ? `<div style="font-size:12px;color:#9badb7;margin-bottom:8px">
+        ${d.situation.foodStores} of food · army ${d.situation.armyStrength} · ${d.situation.population} subjects
+        ${d.grudges?.length ? `<br>grudges: ${d.grudges.map((g: any) => `${g.faction.split(' (')[0]} (${g.weight})`).join(', ')}` : ''}
+      </div>` : ''}
+      <div class="reasoning">“${e.reasoning}”</div>
+      <div style="font-size:12px;color:#9badb7;margin:8px 0 4px">options considered:</div>
+      ${(msg.options ?? []).map((o: string) =>
+        `<div class="opt${o === e.choice ? ' chosen' : ''}">${o === e.choice ? '➤ ' : ''}${o}</div>`).join('')}
+      <div class="src">${e.source === 'fallback' ? 'ruled by instinct (RuleBrain)' : `spoken by the king (${e.source})`}</div>
+    `;
+    councilPanel.style.display = 'block';
+    document.getElementById('council-close')!.addEventListener('click', () => {
+      councilPanel.style.display = 'none';
     });
   }
 

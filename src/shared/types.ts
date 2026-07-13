@@ -107,7 +107,9 @@ export function defaultConfig(): WorldConfig {
     coalitions: true,
     injectors: true,
     genetics: true,
-    decisionWindowTicks: 3,
+    // W must cover LLM inference at 1× (10 t/s): 60 ticks = 6s wall-clock.
+    // At 16× the window is 0.4s — kings rule by instinct (05 speed labels).
+    decisionWindowTicks: 60,
     mirrorMatch: false,
     keyframeIntervalYears: 10,
     namedCapBase: 30,
