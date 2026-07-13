@@ -13,6 +13,7 @@ import { combatSystem } from './combatSystem';
 import { birthDeathSystem } from './birthDeathSystem';
 import { factionSystem } from './factionSystem';
 import { economySystem } from './economySystem';
+import { injectorSystem } from './injectorSystem';
 import { eventDetectSystem } from './eventDetectSystem';
 
 export interface SystemCtx { journal: Journal }
@@ -32,6 +33,7 @@ export const SYSTEMS: System[] = [
   (s) => birthDeathSystem(s),     // 10
   (s) => factionSystem(s),        // 11
   (s) => economySystem(s),        // 12
+  (s) => injectorSystem(s),       // 12.5 pressure injectors (M6)
   (s) => eventDetectSystem(s),    // 13
   // 14 lodSystem        (M6)
   // 15 snapshotSystem — keyframes handled by engine cadence

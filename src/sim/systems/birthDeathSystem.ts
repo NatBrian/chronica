@@ -46,10 +46,15 @@ export function birthDeathSystem(s: SimState): void {
         p.flags[i] &= ~PawnFlag.Pregnant;
         p.pregTicks[i] = 0;
         const father = p.pairId[i];
+        // royal-line inbreeding penalty (04 §Genetics): shared parent → weaker child
+        const inbred = s.config.genetics && father >= 0 && (
+          (p.motherId[i] >= 0 && (p.motherId[i] === p.motherId[father] || p.motherId[i] === p.fatherId[father])) ||
+          (p.fatherId[i] >= 0 && (p.fatherId[i] === p.motherId[father] || p.fatherId[i] === p.fatherId[father])));
         const t = (a: Uint8Array, j: number) => {
           const pa = a[i], pb = father >= 0 ? a[father] : a[i];
           const mut = rngBirths.int(25) - 12;
-          return Math.max(20, Math.min(235, ((pa + pb) >> 1) + (s.config.genetics ? mut : 0)));
+          const base = ((pa + pb) >> 1) + (s.config.genetics ? mut : 0) - (inbred ? 25 : 0);
+          return Math.max(20, Math.min(235, base));
         };
         const child = spawnPawn(s, {
           x: p.x[i], y: p.y[i],

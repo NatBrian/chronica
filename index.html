@@ -33,8 +33,35 @@
     #inspector .offer { display: flex; justify-content: space-between; color: var(--dim); font-size: 12px; }
     #inspector .close { float: right; cursor: pointer; color: var(--dim); }
     #chronicle-rail { grid-area: chronicle; width: 0; background: var(--panel);
-      border-left: 1px solid var(--border); overflow-y: auto; transition: width .2s; }
-    #chronicle-rail.open { width: 340px; }
+      border-left: 1px solid var(--border); overflow-y: auto; transition: width .2s;
+      font-size: 14px; }
+    #chronicle-rail.open { width: 360px; padding: 12px; }
+    #chron-head { display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 10px; gap: 8px; }
+    #chron-lag { color: var(--dim); font-size: 11px; font-style: italic; }
+    #chron-toc { margin-bottom: 12px; }
+    #chron-toc .era-h { color: var(--accent); font-size: 12px; letter-spacing: 1px;
+      margin: 10px 0 4px; text-transform: uppercase; }
+    #chron-toc .toc-ch { color: var(--dim); font-size: 13px; padding: 3px 6px;
+      cursor: pointer; border-radius: 4px; }
+    #chron-toc .toc-ch:hover { background: var(--panel2); color: var(--text); }
+    #chron-body h4 { font-weight: 600; margin: 14px 0 2px; font-size: 16px; }
+    #chron-body .ch-meta { color: var(--dim); font-size: 11px; margin-bottom: 8px; }
+    #chron-body p { line-height: 1.65; margin-bottom: 10px; cursor: pointer;
+      border-left: 2px solid transparent; padding-left: 8px; }
+    #chron-body p:hover { border-left-color: var(--accent); background: #639bff0a; }
+    #chron-empty { color: var(--dim); font-style: italic; padding: 20px 6px; }
+    /* search overlay */
+    #search-overlay { position: fixed; inset: 0; background: #14141fcc; z-index: 60;
+      display: none; padding-top: 12vh; justify-content: center; align-items: flex-start; }
+    #search-box { width: 480px; background: var(--panel); border: 1px solid var(--border);
+      border-radius: 10px; overflow: hidden; }
+    #search-input { width: 100%; background: var(--panel2); border: none; color: var(--text);
+      padding: 12px 16px; font-size: 16px; outline: none; }
+    #search-results { max-height: 50vh; overflow-y: auto; }
+    .sr { padding: 8px 16px; cursor: pointer; display: flex; justify-content: space-between; }
+    .sr:hover, .sr.sel { background: var(--panel2); }
+    .sr .kind { color: var(--dim); font-size: 11px; }
     #event-feed { grid-area: feed; height: 28px; background: var(--panel);
       border-top: 1px solid var(--border); overflow: hidden; display: flex; align-items: center;
       padding: 0 10px; gap: 18px; white-space: nowrap; color: var(--dim); font-size: 13px; }
@@ -68,6 +95,21 @@
       color: var(--dim); display: none; }
     #tab-notice { position: fixed; inset: 0; background: #14141fee; z-index: 100;
       display: none; align-items: center; justify-content: center; font-size: 18px; color: var(--dim); }
+    #overlay-bar { position: absolute; bottom: 160px; left: 10px; display: flex; gap: 4px; }
+    #overlay-bar .ov.active { background: var(--accent); }
+    #minimap { position: absolute; bottom: 12px; left: 10px; border: 1px solid var(--border);
+      border-radius: 6px; image-rendering: pixelated; cursor: pointer; background: #14141f; }
+    #hint { position: absolute; top: 100px; left: 50%; transform: translateX(-50%);
+      background: #1c1c2bf0; border: 1px solid var(--accent); border-radius: 8px;
+      padding: 10px 16px; font-size: 13px; max-width: 380px; z-index: 40; }
+    body.postcard #hud, body.postcard #inspector, body.postcard #event-feed,
+    body.postcard #timeline-bar, body.postcard #chronicle-rail, body.postcard #overlay-bar,
+    body.postcard #minimap, body.postcard #llm-badge, body.postcard #toast-stack { display: none !important; }
+    body.postcard #app { grid-template-rows: 1fr 0 0; grid-template-columns: 1fr 0; }
+    #postcard-caption { position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%);
+      color: var(--text); font-size: 18px; letter-spacing: 2px; text-shadow: 0 1px 4px #000;
+      display: none; }
+    body.postcard #postcard-caption { display: block; }
     #toast-stack { position: absolute; bottom: 60px; right: 14px; display: flex;
       flex-direction: column; gap: 8px; z-index: 25; }
     .toast { background: #1c1c2bf2; border: 1px solid var(--border); border-left: 3px solid var(--accent);
@@ -121,13 +163,28 @@
     <div id="resume-list"></div>
   </div>
   <div id="tab-notice">This world is open in another tab — this tab is read-only.</div>
+  <div id="search-overlay">
+    <div id="search-box">
+      <input id="search-input" placeholder="Search characters, places, events, chapters…" />
+      <div id="search-results"></div>
+    </div>
+  </div>
   <div id="app">
     <div id="world-wrap">
       <canvas id="world"></canvas>
       <div id="hud"><span id="hud-year">Year 0</span> · <span id="hud-pop">—</span><div class="era" id="hud-island"></div></div>
       <div id="inspector" style="display:none"></div>
       <div id="seek-status"></div>
+      <div id="postcard-caption"></div>
       <div id="llm-badge">…</div>
+      <div id="overlay-bar">
+        <button class="ctl ov" data-ov="territory" title="territory (T)">🏳</button>
+        <button class="ctl ov" data-ov="pop" title="population (P)">👥</button>
+        <button class="ctl ov" data-ov="food" title="food scarcity (F)">🌾</button>
+        <button class="ctl ov" data-ov="war" title="war fronts (W)">⚔</button>
+      </div>
+      <canvas id="minimap" width="140" height="140"></canvas>
+      <div id="hint" style="display:none"></div>
       <div id="council-panel" style="display:none"></div>
       <div id="toast-stack"></div>
       <div id="chain-view">
@@ -135,7 +192,15 @@
         <div id="chain-nodes"></div>
       </div>
     </div>
-    <div id="chronicle-rail"></div>
+    <div id="chronicle-rail">
+      <div id="chron-head">
+        <span>📖 The Chronicle</span>
+        <span id="chron-lag"></span>
+        <button class="ctl" id="btn-chron-export" title="export the history book">⬇ book</button>
+      </div>
+      <div id="chron-toc"></div>
+      <div id="chron-body"></div>
+    </div>
     <div id="event-feed"></div>
     <div id="timeline-bar">
       <button class="ctl" id="btn-pause">⏸</button>

@@ -59,6 +59,12 @@ export class BrainQueue {
     this.emitStatus();
   }
 
+  /** Drop requests whose apply deadline already passed (fast-forward leaves
+   * a wake of stale requests; answering them wastes GPU — L2 discards anyway). */
+  prune(currentTick: number): void {
+    this.queue = this.queue.filter(it => it.req.applyAtTick > currentTick + 5);
+  }
+
   enqueue(req: DecisionRequest, simYear: number): void {
     if (!this.brain || this.circuitOpen) return;   // sim falls back on its own
     if (simYear !== this.curYear) { this.curYear = simYear; this.usedThisYear = 0; }

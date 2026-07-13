@@ -2,7 +2,7 @@
 // autosave, journal export/import, multi-tab lock (F4).
 // Dev tools: ?dev=seeds / ?dev=layers&seed=N / ?dev=sprites.
 import { Renderer } from './render/renderer';
-import { RenderMapData } from './render/terrain';
+import { RenderMapData, tileColor } from './render/terrain';
 import { mountSeedBrowser, mountLayerViewer, mountSpritePreview } from './ui/devtools';
 import { bakePawnAtlas, actionToJob, SPRITE_W, SPRITE_H, PawnAtlas } from './render/sprites';
 import { TICKS_PER_YEAR, Journal, DecisionRequest, DecisionResult, JournalEntry } from './shared/types';
@@ -33,10 +33,15 @@ interface WorkerSnapshot {
   t: 'snapshot'; tick: number; year: number; alive: number;
   inPast: boolean; presentYear: number;
   pawns: { x: Int16Array; y: Int16Array; factionId: Uint8Array; flags: Uint16Array; action: Uint8Array; count: number };
-  settlements: { id: number; x: number; y: number; name: string; factionId: number; razed: boolean; pop: number; buildings: { kind: number; x: number; y: number; stage: number }[] }[];
+  settlements: { id: number; x: number; y: number; name: string; factionId: number; razed: boolean; pop: number; stockpile: number[]; buildings: { kind: number; x: number; y: number; stage: number }[] }[];
   factions?: { id: number; race: number; name: string }[];
+  squads?: { x: number; y: number; factionId: number; state: string; n: number }[];
+  caravans?: { x: number; y: number; factionId: number; purpose: string }[];
+  monsters?: { x: number; y: number; kind: string }[];
   eventsTail: { text: string; severity: number }[];
 }
+
+const FACTION_COLORS = ['#639bff', '#6abe30', '#8a6f30', '#ac3232', '#76428a', '#5fcde4', '#d77bba', '#8f974a'];
 
 function bootApp(): void {
   const landing = document.getElementById('landing')!;
@@ -171,10 +176,14 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
         document.title = `Chronica — ${msg.islandName}`;
         worldSeed = msg.header.seed;
         saveStore = new SaveStore(idb, `world:${worldSeed}`);
+        bakeMinimap();
         applySpeed();
         break;
       }
-      case 'snapshot': latest = msg; break;
+      case 'snapshot':
+        latest = msg;
+        brainQueue?.prune(msg.tick);
+        break;
       case 'majorEvents': majors = msg.events; break;
       case 'feed': renderFeed(msg.events); break;
       case 'chain': renderChain(msg.chain); break;
@@ -185,6 +194,17 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
         break;
       }
       case 'decisionApplied': onDecisionApplied(msg); break;
+      case 'chronicle': renderChronicle(msg); break;
+      case 'chronicleDraft': narrateChapter(msg); break;
+      case 'chapterToast':
+        toast(`New chapter: ${msg.title}`, 'click to open the chronicle', false, () => {
+          openChronicle(msg.chapterId);
+        });
+        break;
+      case 'eraToast':
+        toast(`A new era: ${msg.name}`, msg.summary.slice(0, 90) + '…', false, () => openChronicle());
+        break;
+      case 'searchIndex': searchIndexArrived(msg); break;
       case 'inspection': showInspector(msg.pawn); break;
       case 'seeked': {
         seekStatus.style.display = 'none';
@@ -252,6 +272,13 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
   });
 
   window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      closeSearch();
+      councilPanel.style.display = 'none';
+      chainView.style.display = 'none';
+      inspectorEl.style.display = 'none';
+      return;
+    }
     if (e.target instanceof HTMLInputElement) return;
     if (e.code === 'Space') { e.preventDefault(); btnPause.dispatchEvent(new Event('click')); }
     if (e.key === '1' || e.key === '2' || e.key === '3') {
@@ -269,6 +296,17 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
     if (e.key === 'd' || e.key === 'ArrowRight') renderer.camera.pan(-PAN, 0);
     if (e.key === ',' && paused) stepSeek(0.25);
     if (e.key === '.' && paused) stepSeek(1);
+    if (e.key === 'c' || e.key === 'C') {
+      if (rail.classList.contains('open')) rail.classList.remove('open');
+      else openChronicle();
+    }
+    if (e.key === '/') { e.preventDefault(); openSearch(); }
+    if (e.key === 't' || e.key === 'T') setOverlay('territory');
+    if (e.key === 'p' || e.key === 'P') setOverlay('pop');
+    if (e.key === 'f' || e.key === 'F') setOverlay('food');
+    if (e.key === 'W' && !e.shiftKey) setOverlay('war');   // lowercase w pans
+    if (e.key === 'h' || e.key === 'H') togglePostcard();
+    if (e.key === 'g' || e.key === 'G') screenshot();
   });
 
   function stepSeek(years: number): void {
@@ -459,6 +497,220 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
     });
   }
 
+  // ---- the Chronicle panel (07 §3) ----
+  const rail = document.getElementById('chronicle-rail')!;
+  const chronToc = document.getElementById('chron-toc')!;
+  const chronBody = document.getElementById('chron-body')!;
+  const chronLag = document.getElementById('chron-lag')!;
+  let chronState: { chapters: any[]; eras: any[]; lagYears: number } = { chapters: [], eras: [], lagYears: 0 };
+  let narrating = false;
+  let narrateWaits = 0;
+  const narrateBacklog: any[] = [];
+
+  function openChronicle(chapterId?: number): void {
+    rail.classList.add('open');
+    worker.postMessage({ t: 'requestChronicle' });
+    if (chapterId !== undefined) {
+      setTimeout(() => {
+        document.getElementById(`ch-${chapterId}`)?.scrollIntoView({ behavior: 'smooth' });
+      }, 300);
+    }
+  }
+
+  document.getElementById('btn-chron-export')!.addEventListener('click', exportBook);
+
+  function renderChronicle(msg: any): void {
+    chronState = msg;
+    chronLag.textContent = msg.lagYears > 3 ? `the chronicler is ${msg.lagYears} years behind` : '';
+    if (msg.chapters.length === 0) {
+      chronToc.innerHTML = '';
+      chronBody.innerHTML = '<div id="chron-empty">The historian waits for something worth writing…</div>';
+      return;
+    }
+    // TOC grouped by era
+    const byEra = new Map<string, any[]>();
+    for (const c of msg.chapters) {
+      if (!byEra.has(c.era)) byEra.set(c.era, []);
+      byEra.get(c.era)!.push(c);
+    }
+    chronToc.innerHTML = '';
+    for (const [era, chs] of byEra) {
+      const h = document.createElement('div');
+      h.className = 'era-h';
+      h.textContent = era;
+      chronToc.appendChild(h);
+      for (const c of chs) {
+        const d = document.createElement('div');
+        d.className = 'toc-ch';
+        d.textContent = `${c.title}`;
+        d.addEventListener('click', () => {
+          document.getElementById(`ch-${c.id}`)?.scrollIntoView({ behavior: 'smooth' });
+        });
+        chronToc.appendChild(d);
+      }
+    }
+    // body: full book, paragraph anchors clickable → time machine (the soul)
+    chronBody.innerHTML = '';
+    for (const c of msg.chapters) {
+      const h = document.createElement('h4');
+      h.id = `ch-${c.id}`;
+      h.textContent = c.title;
+      chronBody.appendChild(h);
+      const meta = document.createElement('div');
+      meta.className = 'ch-meta';
+      meta.textContent = `${c.era} · Years ${c.yearStart}–${c.yearEnd}${c.source === 'template' ? ' · (chronicler’s notes)' : ''}`;
+      chronBody.appendChild(meta);
+      for (const p of c.paragraphs) {
+        const el = document.createElement('p');
+        el.textContent = p.text;
+        el.title = `Travel to Year ${p.anchor.year}`;
+        el.addEventListener('click', () => {
+          renderer.camera.cx = p.anchor.x; renderer.camera.cy = p.anchor.y;
+          if (renderer.camera.level < 2) renderer.camera.level = 2;
+          doSeek(p.anchor.year);
+        });
+        chronBody.appendChild(el);
+      }
+    }
+  }
+
+  function exportBook(): void {
+    const island = hudIsland.textContent ?? 'the Island';
+    const year = latest?.presentYear ?? latest?.year ?? 0;
+    const parts: string[] = [
+      `<h1>The History of ${island}</h1>`,
+      `<p style="color:#666">Years 1–${year}, as set down by the island's chroniclers.</p>`,
+    ];
+    let curEra = '';
+    for (const c of chronState.chapters) {
+      if (c.era !== curEra) { curEra = c.era; parts.push(`<h2>${curEra}</h2>`); }
+      parts.push(`<h3>${c.title}</h3>`);
+      parts.push(`<p style="color:#888;font-size:12px">Years ${c.yearStart}–${c.yearEnd}</p>`);
+      for (const p of c.paragraphs) parts.push(`<p>${p.text}</p>`);
+    }
+    for (const era of chronState.eras) {
+      parts.push(`<hr><p><i>${era.name} (${era.yearStart}–${era.yearEnd}): ${era.summary}</i></p>`);
+    }
+    const html = `<!doctype html><meta charset="utf-8"><title>The History of ${island}</title>
+<body style="max-width:680px;margin:40px auto;font-family:Georgia,serif;line-height:1.7;padding:0 20px">
+${parts.join('\n')}</body>`;
+    const blob = new Blob([html], { type: 'text/html' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `history-of-${island}.html`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  // chronicler LLM lane: low priority — write only while the kings' queue idles
+  async function narrateChapter(msg: any): Promise<void> {
+    narrateBacklog.push(msg);
+    void pumpNarration();
+  }
+
+  async function pumpNarration(): Promise<void> {
+    if (narrating || narrateBacklog.length === 0) return;
+    const brain = (brainQueue as any)?.['brain'] as any;
+    const ollama = brain && brain.name === 'ollama' ? brain : null;
+    if (!ollama || brainQueue?.status().mode !== 'llm') { narrateBacklog.length = 0; return; }
+    if (brainQueue.status().inFlight && narrateWaits < 8) {
+      narrateWaits++;
+      setTimeout(() => void pumpNarration(), 2500);
+      return;
+    }
+    narrateWaits = 0;
+    const msg = narrateBacklog.shift()!;
+    narrating = true;
+    try {
+      const res = await ollama.narrate({
+        titleHint: msg.titleFallback,
+        era: msg.era,
+        yearStart: msg.draft.yearStart,
+        yearEnd: msg.draft.yearEnd,
+        facts: msg.facts,
+        islandName: msg.islandName,
+        retryNote: msg.retryNote,
+      });
+      worker.postMessage({ t: 'chapterProse', chapterId: msg.draft.id, title: res.title, paragraphs: res.paragraphs });
+    } catch (err) {
+      console.warn('chronicler narrate failed:', err);
+    }
+    narrating = false;
+    void pumpNarration();
+  }
+
+  // ---- global search (07 §9): '/' ----
+  const searchOverlay = document.getElementById('search-overlay')!;
+  const searchInput = document.getElementById('search-input') as HTMLInputElement;
+  const searchResults = document.getElementById('search-results')!;
+  let searchIndex: any = null;
+
+  function openSearch(): void {
+    searchOverlay.style.display = 'flex';
+    searchInput.value = '';
+    searchResults.innerHTML = '';
+    searchInput.focus();
+    worker.postMessage({ t: 'searchIndex' });
+  }
+  function closeSearch(): void { searchOverlay.style.display = 'none'; }
+  searchOverlay.addEventListener('click', (e) => { if (e.target === searchOverlay) closeSearch(); });
+
+  function searchIndexArrived(msg: any): void { searchIndex = msg; runSearch(); }
+  searchInput.addEventListener('input', runSearch);
+
+  function runSearch(): void {
+    if (!searchIndex) return;
+    const q = searchInput.value.trim().toLowerCase();
+    searchResults.innerHTML = '';
+    if (q.length < 2) return;
+    const results: { label: string; kind: string; act: () => void }[] = [];
+    for (const c of searchIndex.characters) {
+      if (!c.name.toLowerCase().includes(q)) continue;
+      results.push({
+        label: `${c.name}${c.dead ? ' †' : ''} — ${c.role}, ${c.faction}`,
+        kind: 'character',
+        act: () => {
+          if (!c.dead && c.x >= 0) { renderer.camera.cx = c.x; renderer.camera.cy = c.y; renderer.camera.level = 2; worker.postMessage({ t: 'inspect', x: c.x, y: c.y }); }
+          else if (c.deathEventId >= 0) worker.postMessage({ t: 'chain', eventId: c.deathEventId });
+        },
+      });
+    }
+    for (const p of searchIndex.places) {
+      if (!p.name.toLowerCase().includes(q)) continue;
+      results.push({
+        label: `${p.name}${p.razed ? ' (ruins)' : ''} — ${p.faction}`,
+        kind: 'place',
+        act: () => { renderer.camera.cx = p.x; renderer.camera.cy = p.y; renderer.camera.level = 2; },
+      });
+    }
+    for (const c of searchIndex.chapters) {
+      if (!c.title.toLowerCase().includes(q) && !c.era.toLowerCase().includes(q)) continue;
+      results.push({ label: `${c.title} — ${c.era}`, kind: 'chapter', act: () => openChronicle(c.id) });
+    }
+    for (const ev of searchIndex.events) {
+      if (!ev.text.toLowerCase().includes(q)) continue;
+      results.push({
+        label: ev.text.slice(0, 70),
+        kind: 'event',
+        act: () => {
+          renderer.camera.cx = ev.x; renderer.camera.cy = ev.y;
+          doSeek(ev.tick / TICKS_PER_YEAR);
+          worker.postMessage({ t: 'chain', eventId: ev.id });
+        },
+      });
+    }
+    for (const r of results.slice(0, 14)) {
+      const el = document.createElement('div');
+      el.className = 'sr';
+      el.innerHTML = `<span>${r.label}</span><span class="kind">${r.kind}</span>`;
+      el.addEventListener('click', () => { r.act(); closeSearch(); });
+      searchResults.appendChild(el);
+    }
+    if (results.length === 0) {
+      searchResults.innerHTML = '<div class="sr"><span style="color:#9badb7">nothing found</span></div>';
+    }
+  }
+
   // ---- event feed (07): clickable ticker → camera jump + causality chain ----
   const feed = document.getElementById('event-feed')!;
   const chainView = document.getElementById('chain-view')!;
@@ -513,14 +765,212 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
     chainView.style.display = 'block';
   }
 
+  // ---- overlays (06/07): T/P/F/W, one at a time ----
+  let overlayMode: '' | 'territory' | 'pop' | 'food' | 'war' = '';
+  const overlayCanvas = document.createElement('canvas');
+  overlayCanvas.width = 128; overlayCanvas.height = 128;
+  let overlayKey = '';
+
+  function setOverlay(mode: typeof overlayMode): void {
+    overlayMode = overlayMode === mode ? '' : mode;
+    overlayKey = '';
+    document.querySelectorAll<HTMLElement>('.ov').forEach(b => {
+      b.classList.toggle('active', b.dataset.ov === overlayMode);
+    });
+  }
+  document.querySelectorAll<HTMLElement>('.ov').forEach(b => {
+    b.addEventListener('click', () => setOverlay(b.dataset.ov as typeof overlayMode));
+  });
+
+  function refreshOverlay(): void {
+    if (!latest || !renderer.terrain || overlayMode === '' || overlayMode === 'war') return;
+    const key = `${overlayMode}:${latest.settlements.map(s2 => `${s2.factionId}${s2.razed ? 'r' : ''}${s2.pop}`).join(',')}`;
+    if (key === overlayKey) return;
+    overlayKey = key;
+    const octx = overlayCanvas.getContext('2d')!;
+    octx.clearRect(0, 0, 128, 128);
+    const N = renderer.terrain.map.size;
+    const scale = 128 / N;
+    if (overlayMode === 'territory') {
+      const img = octx.createImageData(128, 128);
+      for (let y = 0; y < 128; y++) {
+        for (let x = 0; x < 128; x++) {
+          const wx = x / scale, wy = y / scale;
+          const ti = Math.floor(wy) * N + Math.floor(wx);
+          if (!isLandBiome(renderer.terrain.map.biome[ti])) continue;
+          let best = -1, bestD = 60 * 60;
+          for (const st of latest.settlements) {
+            if (st.razed) continue;
+            const dx = st.x - wx, dy = st.y - wy;
+            const d = dx * dx + dy * dy;
+            if (d < bestD) { bestD = d; best = st.factionId; }
+          }
+          if (best < 0) continue;
+          const col = FACTION_COLORS[best] ?? '#fff';
+          const o = (y * 128 + x) * 4;
+          img.data[o] = parseInt(col.slice(1, 3), 16);
+          img.data[o + 1] = parseInt(col.slice(3, 5), 16);
+          img.data[o + 2] = parseInt(col.slice(5, 7), 16);
+          img.data[o + 3] = 70;
+        }
+      }
+      octx.putImageData(img, 0, 0);
+    } else if (overlayMode === 'pop') {
+      octx.fillStyle = '#d9a06655';
+      const p = latest.pawns;
+      for (let i = 0; i < p.count; i++) {
+        if (!(p.flags[i] & 1)) continue;
+        octx.fillRect(p.x[i] * scale - 1, p.y[i] * scale - 1, 2.5, 2.5);
+      }
+    } else if (overlayMode === 'food') {
+      for (const st of latest.settlements) {
+        if (st.razed) continue;
+        const food = (st.stockpile?.[0] ?? 0) + (st.stockpile?.[1] ?? 0) + (st.stockpile?.[2] ?? 0);
+        const perCap = st.pop > 0 ? food / st.pop : 99;
+        const bad = perCap < 8;
+        octx.fillStyle = bad ? '#d9576388' : '#6abe3055';
+        octx.beginPath();
+        octx.arc(st.x * scale, st.y * scale, Math.max(4, Math.sqrt(st.pop) * 0.9), 0, 7);
+        octx.fill();
+      }
+    }
+  }
+
+  function drawOverlay(): void {
+    if (overlayMode === '' || !renderer.terrain) return;
+    const ctx = renderer.ctx;
+    const cam = renderer.camera;
+    if (overlayMode === 'war') {
+      // war fronts: crossed-swords at fighting squads, arrows on marchers
+      for (const sq of latest?.squads ?? []) {
+        const [sx, sy] = cam.worldToScreen(sq.x, sq.y);
+        ctx.font = `${Math.max(14, cam.pxPerTile)}px system-ui`;
+        ctx.fillText(sq.state === 'fight' ? '⚔️' : sq.state === 'rout' ? '🏳' : '🚩', sx, sy);
+      }
+      return;
+    }
+    refreshOverlay();
+    const N = renderer.terrain.map.size;
+    const [sx, sy] = cam.worldToScreen(0, 0);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(overlayCanvas, sx, sy, N * cam.pxPerTile, N * cam.pxPerTile);
+  }
+
+  function isLandBiome(b: number): boolean {
+    return b !== 0 && b !== 1 && b !== 2;
+  }
+
+  // ---- minimap (07 §7) ----
+  const minimap = document.getElementById('minimap') as HTMLCanvasElement;
+  let minimapBase: HTMLCanvasElement | null = null;
+  function bakeMinimap(): void {
+    if (!renderer.terrain) return;
+    const m = renderer.terrain.map;
+    const c = document.createElement('canvas');
+    c.width = 128; c.height = 128;
+    const cctx = c.getContext('2d')!;
+    const img = cctx.createImageData(128, 128);
+    const step = m.size / 128;
+    for (let y = 0; y < 128; y++) {
+      for (let x = 0; x < 128; x++) {
+        const i = Math.floor(y * step) * m.size + Math.floor(x * step);
+        const [r, g, b] = tileColor(m as any, i, x, y);
+        const o = (y * 128 + x) * 4;
+        img.data[o] = r; img.data[o + 1] = g; img.data[o + 2] = b; img.data[o + 3] = 255;
+      }
+    }
+    cctx.putImageData(img, 0, 0);
+    minimapBase = c;
+  }
+  function drawMinimap(): void {
+    if (!minimapBase || !renderer.terrain) return;
+    const mctx = minimap.getContext('2d')!;
+    mctx.imageSmoothingEnabled = false;
+    mctx.drawImage(minimapBase, 0, 0, 140, 140);
+    const N = renderer.terrain.map.size;
+    const k = 140 / N;
+    // settlements
+    for (const st of latest?.settlements ?? []) {
+      if (st.razed) continue;
+      mctx.fillStyle = FACTION_COLORS[st.factionId] ?? '#fff';
+      mctx.fillRect(st.x * k - 1, st.y * k - 1, 3, 3);
+    }
+    // war markers
+    for (const sq of latest?.squads ?? []) {
+      if (sq.state !== 'fight') continue;
+      mctx.fillStyle = '#d95763';
+      mctx.fillRect(sq.x * k - 2, sq.y * k - 2, 4, 4);
+    }
+    // camera rect
+    const cam = renderer.camera;
+    const w = cam.viewW / cam.pxPerTile * k, h = cam.viewH / cam.pxPerTile * k;
+    mctx.strokeStyle = '#cbdbfc';
+    mctx.strokeRect(cam.cx * k - w / 2, cam.cy * k - h / 2, w, h);
+  }
+  minimap.addEventListener('click', (e) => {
+    if (!renderer.terrain) return;
+    const rect = minimap.getBoundingClientRect();
+    const N = renderer.terrain.map.size;
+    renderer.camera.cx = (e.clientX - rect.left) / rect.width * N;
+    renderer.camera.cy = (e.clientY - rect.top) / rect.height * N;
+  });
+
+  // ---- postcard mode + screenshot (06) ----
+  const postcardCaption = document.getElementById('postcard-caption')!;
+  function togglePostcard(): void {
+    document.body.classList.toggle('postcard');
+    if (document.body.classList.contains('postcard') && latest) {
+      postcardCaption.textContent = `${hudIsland.textContent} · Year ${latest.year}`;
+    }
+  }
+  function screenshot(): void {
+    const a = document.createElement('a');
+    a.href = canvas.toDataURL('image/png');
+    a.download = `chronica-${hudIsland.textContent}-y${latest?.year ?? 0}.png`;
+    a.click();
+  }
+
+  // ---- A1: background tab — sim continues at 1× (deliberate default) ----
+  let prePauseSpeed = 0;
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      if (!paused && speed > 1) {
+        prePauseSpeed = speed;
+        worker.postMessage({ t: 'speed', ticksPerSec: 10 });
+      }
+    } else if (prePauseSpeed > 0) {
+      prePauseSpeed = 0;
+      applySpeed();
+    }
+  });
+
+  // ---- progressive onboarding hints (07): contextual, lazy, dismissible ----
+  const hintEl = document.getElementById('hint')!;
+  const seenHints = new Set<string>(JSON.parse(localStorage.getItem('chronica.hints') ?? '[]'));
+  function showHint(key: string, text: string): void {
+    if (seenHints.has(key) || localStorage.getItem('chronica.nohints')) return;
+    seenHints.add(key);
+    localStorage.setItem('chronica.hints', JSON.stringify([...seenHints]));
+    hintEl.innerHTML = `${text} <span style="color:#9badb7;cursor:pointer;margin-left:8px" id="hint-x">dismiss</span>`;
+    hintEl.style.display = 'block';
+    document.getElementById('hint-x')!.addEventListener('click', () => { hintEl.style.display = 'none'; });
+    setTimeout(() => { hintEl.style.display = 'none'; }, 12000);
+  }
+  setTimeout(() => showHint('welcome', '⏯ Space pauses · 1/2/3 sets speed · drag to pan, wheel to zoom.'), 4000);
+  setTimeout(() => showHint('feed', '⚔ When something happens, click it in the feed below to see WHY.'), 45000);
+  setTimeout(() => showHint('chronicle', '📖 Press C to read the history book your world is writing.'), 90000);
+  setTimeout(() => showHint('timeline', '⏪ Click anywhere on the timeline to travel back in time.'), 150000);
+
   // ---- render loop ----
   let lastT = performance.now();
   function frame(now: number): void {
     const dt = now - lastT; lastT = now;
     renderer.camera.update(dt);
     renderer.drawTerrain();
+    drawOverlay();
     drawDynamic();
     drawTimeline();
+    drawMinimap();
     if (latest) {
       hudYear.textContent = `Year ${latest.year}`;
       yearLabel.textContent = `Year ${latest.year}`;
@@ -568,6 +1018,35 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
         ctx.fillText(st.name, Math.round(sx + r), Math.round(sy - 4));
       }
     }
+    // squads: banner markers; caravans: wagon dots; monsters: big glyphs (M6)
+    for (const sq of latest.squads ?? []) {
+      const [sx, sy] = cam.worldToScreen(sq.x, sq.y);
+      if (sx < -20 || sy < -20 || sx > cam.viewW + 20 || sy > cam.viewH + 20) continue;
+      ctx.fillStyle = FACTION_COLORS[sq.factionId] ?? '#fff';
+      const h2 = Math.max(6, cam.pxPerTile * 0.8);
+      ctx.fillRect(Math.round(sx), Math.round(sy - h2), 2, Math.round(h2));
+      ctx.fillRect(Math.round(sx + 2), Math.round(sy - h2), Math.round(h2 * 0.6), Math.round(h2 * 0.35));
+      if (sq.state === 'fight' && cam.pxPerTile >= 4) {
+        ctx.font = `${Math.max(12, cam.pxPerTile)}px system-ui`;
+        ctx.fillText('⚔️', sx - 6, sy - h2 - 2);
+      }
+    }
+    for (const c of latest.caravans ?? []) {
+      const [sx, sy] = cam.worldToScreen(c.x, c.y);
+      if (sx < -10 || sy < -10 || sx > cam.viewW + 10 || sy > cam.viewH + 10) continue;
+      ctx.fillStyle = '#d9a066';
+      const r = Math.max(2, cam.pxPerTile * 0.4);
+      ctx.fillRect(Math.round(sx - r / 2), Math.round(sy - r / 2), Math.round(r), Math.round(r * 0.7));
+      ctx.fillStyle = FACTION_COLORS[c.factionId] ?? '#fff';
+      ctx.fillRect(Math.round(sx - r / 2), Math.round(sy - r), Math.round(r * 0.5), Math.round(r * 0.4));
+    }
+    for (const m of latest.monsters ?? []) {
+      const [sx, sy] = cam.worldToScreen(m.x, m.y);
+      if (sx < -30 || sy < -30 || sx > cam.viewW + 30 || sy > cam.viewH + 30) continue;
+      ctx.font = `${Math.max(14, cam.pxPerTile * (m.kind === 'dragon' ? 1.6 : 1))}px system-ui`;
+      ctx.fillText(m.kind === 'dragon' ? '🐉' : m.kind === 'troll' ? '🧌' : '🐺', sx, sy);
+    }
+
     // pawns: dots at region zoom, sprites at local/close
     if (cam.pxPerTile >= 4) {
       const p = latest.pawns;

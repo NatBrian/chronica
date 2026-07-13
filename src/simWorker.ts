@@ -1,9 +1,12 @@
 // Sim Web Worker — hosts the deterministic Sim; render thread gets snapshots
 // via transferable buffers (01). This file is NOT /src/sim (it may use timers).
 import { Sim } from './sim/engine';
-import { WorldConfig, defaultConfig, TICKS_PER_YEAR, JournalEntry, Journal, ACTION_NAMES } from './shared/types';
+import { WorldConfig, defaultConfig, TICKS_PER_YEAR, JournalEntry, Journal, ACTION_NAMES, ChronicleChapter } from './shared/types';
 import { AGE_SCALE, PawnFlag, packSnapshot, snapshot, restore, unpackSnapshot } from './sim/state';
 import { scoreOffers } from './sim/systems/utilityAISystem';
+import { detectChapters, detectEra, ChapterDraft, EraDraft } from './chronicle/detector';
+import { templateChapter, draftTitle } from './chronicle/templates';
+import { validateChapter, chapterKnownNames } from './chronicle/validator';
 
 let sim: Sim | null = null;
 let ticksPerSec = 0;           // 0 = paused
@@ -18,6 +21,152 @@ let lastAutosaveDecade = 0;
 // request digests cached so council panel can show what the king saw (M4)
 const digestCache = new Map<number, { digest: unknown; options: string[]; kind: string }>();
 let lastJournalScan = 0;
+
+// ---- the Chronicle (M5): stored content, never regenerated (05) ----
+interface ChronicleStore {
+  chapters: ChronicleChapter[];
+  eras: EraDraft[];
+  cursorEventId: number;
+  nextChapterId: number;
+  lastEraYear: number;
+  drafts: Record<number, ChapterDraft>;   // awaiting LLM prose (template already placed)
+  retried: Record<number, boolean>;
+}
+let chronicle: ChronicleStore = emptyChronicle();
+let lastChronicleCheck = 0;
+
+function emptyChronicle(): ChronicleStore {
+  return { chapters: [], eras: [], cursorEventId: -1, nextChapterId: 0, lastEraYear: 0, drafts: {}, retried: {} };
+}
+
+function currentEraName(): string {
+  return chronicle.eras.length > 0 ? chronicle.eras[chronicle.eras.length - 1].name : 'The First Age';
+}
+
+function chronicleTick(): void {
+  if (!sim || presentPack) return;                     // never chapter a replay view
+  const s = sim.state;
+  if (s.tick - lastChronicleCheck < 2 * TICKS_PER_YEAR) return;
+  lastChronicleCheck = s.tick;
+
+  const { drafts, cursor } = detectChapters(s.events, chronicle.cursorEventId, s.tick, chronicle.nextChapterId);
+  chronicle.cursorEventId = Math.max(chronicle.cursorEventId, cursor);
+  const factionNames = s.factions.map(f => f.name);
+  for (const draft of drafts) {
+    chronicle.nextChapterId = Math.max(chronicle.nextChapterId, draft.id + 1);
+    const facts = draft.factIds.map(id => s.events.find(e => e.id === id)!).filter(Boolean);
+    const title = draftTitle(draft, facts, factionNames);
+    // template chapter immediately — the book is never blank; LLM upgrades it
+    const chapter = templateChapter(draft, facts, title, currentEraName());
+    chronicle.chapters.push(chapter);
+    chronicle.drafts[draft.id] = draft;
+    post({
+      t: 'chronicleDraft',
+      draft,
+      titleFallback: title,
+      era: currentEraName(),
+      islandName: s.islandName,
+      facts: facts.map(f => f.text),
+    });
+    post({ t: 'chapterToast', title, chapterId: draft.id });
+  }
+
+  // era detection every ~60 years
+  const year = Math.floor(s.tick / TICKS_PER_YEAR);
+  if (year - chronicle.lastEraYear >= 60) {
+    const era = detectEra(
+      chronicle.chapters.map(c => ({ kind: kindOf(c), yearStart: c.yearStart, yearEnd: c.yearEnd, title: c.title })),
+      chronicle.lastEraYear, year, s.islandName);
+    chronicle.eras.push(era);
+    chronicle.lastEraYear = year;
+    // back-fill era names onto chapters of that span
+    for (const c of chronicle.chapters) {
+      if (c.yearStart >= era.yearStart && c.yearStart < era.yearEnd) c.era = era.name;
+    }
+    post({ t: 'eraToast', name: era.name, summary: era.summary });
+  }
+
+  if (drafts.length > 0 || year - chronicle.lastEraYear === 0) {
+    postChronicle();
+  }
+}
+
+function kindOf(c: ChronicleChapter): string {
+  const t = c.title.toLowerCase();
+  if (t.includes('war') || t.includes('burning')) return 'war';
+  if (t.includes('hungry')) return 'famine';
+  if (t.includes('crown')) return 'succession';
+  if (t.includes('last days')) return 'ending';
+  return 'era-life';
+}
+
+function postChronicle(): void {
+  if (!sim) return;
+  const lastEvent = sim.state.events[sim.state.events.length - 1];
+  const lastChaptered = chronicle.chapters.length > 0
+    ? Math.max(...chronicle.chapters.map(c => c.yearEnd)) : 0;
+  post({
+    t: 'chronicle',
+    chapters: chronicle.chapters,
+    eras: chronicle.eras,
+    lagYears: Math.max(0, Math.floor(sim.state.tick / TICKS_PER_YEAR) - lastChaptered),
+  });
+}
+
+/** LLM prose arrives: validate, retry once, else keep template (05 pipeline). */
+function receiveProse(msg: { chapterId: number; title: string; paragraphs: string[] }): void {
+  if (!sim) return;
+  const s = sim.state;
+  const draft = chronicle.drafts[msg.chapterId];
+  const chapter = chronicle.chapters.find(c => c.id === msg.chapterId);
+  if (!draft || !chapter) return;
+  const facts = draft.factIds.map(id => s.events.find(e => e.id === id)!).filter(Boolean);
+  const known = chapterKnownNames(
+    facts,
+    s.named.map(n => n.name),
+    s.factions.map(f => f.name),
+    s.settlements.map(st => st.name),
+    s.factions.map(f => f.god),
+    s.islandName,
+  );
+  const prose = msg.paragraphs.join('\n');
+  const check = validateChapter({
+    prose, facts, knownNames: known,
+    yearStart: chapter.yearStart, yearEnd: chapter.yearEnd,
+  });
+  if (!check.ok) {
+    if (!chronicle.retried[msg.chapterId]) {
+      chronicle.retried[msg.chapterId] = true;
+      const cached = chronicle.drafts[msg.chapterId];
+      post({
+        t: 'chronicleDraft',
+        draft: cached,
+        titleFallback: chapter.title,
+        era: chapter.era,
+        islandName: s.islandName,
+        facts: facts.map(f => f.text),
+        retryNote: check.violations.join('; '),
+      });
+    }
+    // template stays — marked, honest (05: else template fallback)
+    return;
+  }
+  // accepted: upgrade the stored chapter (anchors from facts, never prose)
+  const anchorsPerPara = Math.max(1, Math.floor(facts.length / msg.paragraphs.length));
+  chapter.title = msg.title.slice(0, 80);
+  chapter.paragraphs = msg.paragraphs.map((text, i) => {
+    const f = facts[Math.min(facts.length - 1, i * anchorsPerPara)];
+    return {
+      text,
+      anchor: { year: Math.floor(f.tick / TICKS_PER_YEAR), x: f.x, y: f.y, eventId: f.id },
+    };
+  });
+  chapter.source = 'llm';
+  delete chronicle.drafts[msg.chapterId];
+  postChronicle();
+  // written prose is content, not view — persist immediately (05: stored, never regenerated)
+  forceAutosave();
+}
 
 const SNAPSHOT_HZ = 20;
 
@@ -63,6 +212,11 @@ function snapshotMsg() {
     factions: s.factions.map(f => ({
       id: f.id, race: f.race, name: f.name, extinct: f.extinct, leaderId: f.leaderId,
     })),
+    squads: s.squads.map(sq => ({
+      x: sq.x, y: sq.y, factionId: sq.factionId, state: sq.state, n: sq.members.length,
+    })),
+    caravans: s.caravans.map(c => ({ x: c.x, y: c.y, factionId: c.factionId, purpose: c.purpose })),
+    monsters: s.monsters.map(m => ({ x: m.x, y: m.y, kind: m.kind })),
     eventsTail: s.events.slice(-40),
     eventCount: s.events.length,
     yearStats: s.yearStats.slice(-1),
@@ -84,6 +238,11 @@ function maybeAutosave(): void {
   const decade = Math.floor(sim.state.tick / (10 * TICKS_PER_YEAR));
   if (decade <= lastAutosaveDecade) return;
   lastAutosaveDecade = decade;
+  forceAutosave();
+}
+
+function forceAutosave(): void {
+  if (!sim || presentPack) return;
   const pack = packSnapshot(snapshot(sim.state));
   post({
     t: 'autosave',
@@ -94,6 +253,7 @@ function maybeAutosave(): void {
       tick: sim.state.tick,
       journal: sim.journal,
       snapshot: pack,
+      chronicle,
     },
   }, [pack]);
 }
@@ -136,6 +296,7 @@ function loop(): void {
   }
   if (reqs.length > 0 && !replayMode && !presentPack) post({ t: 'requests', requests: reqs });
   notifyAppliedDecisions();
+  chronicleTick();
   maybeAutosave();
   maybeSendMajors();
   sendSnapshot();
@@ -173,11 +334,15 @@ self.onmessage = (e: MessageEvent) => {
         restore(sim.state, unpackSnapshot(msg.resume.snapshot as ArrayBuffer));
         lastAutosaveDecade = Math.floor(sim.state.tick / (10 * TICKS_PER_YEAR));
         replayMode = false;
+        chronicle = (msg.resume.chronicle as ChronicleStore) ?? emptyChronicle();
+        lastChronicleCheck = sim.state.tick;
       } else {
         sim = msg.journal
           ? new Sim(msg.journal as Journal)
           : Sim.fresh(msg.seed as number, config);
         replayMode = !!msg.journal && !msg.continueLive;
+        chronicle = emptyChronicle();
+        lastChronicleCheck = 0;
       }
       presentPack = null;
       lastMajorCount = -1;
@@ -242,6 +407,26 @@ self.onmessage = (e: MessageEvent) => {
       }
       e.seq = sim.journal.entries.length;
       sim.submitDecision(e);
+      break;
+    }
+    case 'chapterProse': {
+      receiveProse(msg as { chapterId: number; title: string; paragraphs: string[] });
+      break;
+    }
+    case 'requestChronicle': {
+      postChronicle();
+      break;
+    }
+    case 'searchIndex': {
+      if (!sim) break;
+      const s2 = sim.state;
+      post({
+        t: 'searchIndex',
+        characters: s2.named.map(n => ({ id: n.id, name: n.name, role: n.role, faction: s2.factions[n.factionId]?.name ?? '', dead: n.deathTick >= 0, x: n.pawnIdx >= 0 ? s2.pawns.x[n.pawnIdx] : -1, y: n.pawnIdx >= 0 ? s2.pawns.y[n.pawnIdx] : -1, deathEventId: n.deathCauseEventId, bio: n.bio.join(' ') })),
+        places: s2.settlements.map(st => ({ id: st.id, name: st.name, x: st.x, y: st.y, razed: st.razed, faction: s2.factions[st.factionId]?.name ?? '' })),
+        events: s2.events.filter(e => e.severity >= 3).map(e => ({ id: e.id, text: e.text, tick: e.tick, x: e.x, y: e.y })),
+        chapters: chronicle.chapters.map(c => ({ id: c.id, title: c.title, era: c.era, yearStart: c.yearStart })),
+      });
       break;
     }
     case 'exportJournal': {
