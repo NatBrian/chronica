@@ -86,3 +86,9 @@ export function eventMeta(type: EventType): EventMeta {
 }
 
 export const CATEGORY_LIST: EventCategory[] = ['war', 'politics', 'disaster', 'economy', 'life'];
+
+/** Era band colors (G2): cycled per era index, shared by timeline + charts. */
+const ERA_COLORS = ['#3f3f74', '#524b24', '#45283c', '#306082', '#663931', '#76428a'];
+export function eraColor(i: number): string {
+  return ERA_COLORS[((i % ERA_COLORS.length) + ERA_COLORS.length) % ERA_COLORS.length];
+}

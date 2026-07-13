@@ -8,7 +8,7 @@ import { bakePawnAtlas, actionToJob, SPRITE_W, SPRITE_H, PawnAtlas } from './ren
 import { bakeMapIcons } from './render/mapIcons';
 import { MapMode } from './render/mapMode';
 import { FACTION_HEX } from './render/palette';
-import { eventMeta, CATEGORY_LIST, CATEGORY_COLOR, EventCategory } from './ui/eventMeta';
+import { eventMeta, CATEGORY_LIST, CATEGORY_COLOR, EventCategory, eraColor } from './ui/eventMeta';
 import { TICKS_PER_YEAR, Journal, DecisionRequest, DecisionResult, JournalEntry } from './shared/types';
 import { SaveStore, IdbBackend, SaveRecord } from './shared/saveStore';
 import { Brain } from './brain/brain';
@@ -202,6 +202,8 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
         saveStore = new SaveStore(idb, `world:${worldSeed}`);
         bakeMinimap();
         applySpeed();
+        // timeline v2 era bands need the chronicle's eras from the start
+        worker.postMessage({ t: 'requestChronicle' });
         break;
       }
       case 'snapshot':
@@ -385,18 +387,35 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
   }, { passive: false });
   window.addEventListener('resize', () => { renderer.resize(); sizeTimeline(); });
 
-  // ---- timeline (the marquee: 07) ----
+  // ---- timeline v2 (11 §G2): era bands, category markers, two-stage zoom ----
   const tl = document.getElementById('timeline') as HTMLCanvasElement;
   const tlTip = document.getElementById('tl-tooltip')!;
+  let tlZoom: { y0: number; y1: number } | null = null;   // decade strip when set
+  const ERA_H = 9;                                        // era band strip height
   function sizeTimeline(): void {
     tl.width = tl.clientWidth || 600;
-    tl.height = 26;
+    tl.height = 34;
   }
   sizeTimeline();
 
-  function timelineSpanYears(): number {
-    if (!latest) return 10;
-    return Math.max(10, latest.presentYear);
+  function tlSpan(): { y0: number; y1: number } {
+    if (tlZoom) return tlZoom;
+    return { y0: 0, y1: latest ? Math.max(10, latest.presentYear) : 10 };
+  }
+  function yearToX(year: number, W: number): number {
+    const s = tlSpan();
+    return ((year - s.y0) / Math.max(1, s.y1 - s.y0)) * W;
+  }
+  function xToYear(x: number, w: number): number {
+    const s = tlSpan();
+    return s.y0 + (x / w) * (s.y1 - s.y0);
+  }
+  function eraAt(year: number): { name: string; yearStart: number; yearEnd: number; idx: number } | null {
+    for (let i = 0; i < chronState.eras.length; i++) {
+      const era = chronState.eras[i];
+      if (year >= era.yearStart && year < era.yearEnd) return { ...era, idx: i };
+    }
+    return null;
   }
 
   function drawTimeline(): void {
@@ -404,26 +423,64 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
     const W = tl.width, H = tl.height;
     ctx.clearRect(0, 0, W, H);
     if (!latest) return;
-    const span = timelineSpanYears();
+    // era bands (named, colored)
+    ctx.font = '9px system-ui';
+    ctx.textBaseline = 'top';
+    chronState.eras.forEach((era: any, i: number) => {
+      const x0 = Math.max(0, yearToX(era.yearStart, W));
+      const x1 = Math.min(W, yearToX(era.yearEnd, W));
+      if (x1 <= 0 || x0 >= W) return;
+      ctx.fillStyle = eraColor(i);
+      ctx.globalAlpha = 0.85;
+      ctx.fillRect(x0, 0, x1 - x0, ERA_H - 1);
+      ctx.globalAlpha = 1;
+      if (x1 - x0 > 76) {
+        ctx.fillStyle = '#cbdbfc';
+        ctx.fillText(era.name.slice(0, Math.floor((x1 - x0) / 6)), x0 + 3, 0);
+      }
+    });
     // baseline
     ctx.fillStyle = '#23233a';
-    ctx.fillRect(0, H - 8, W, 4);
-    // event markers
+    ctx.fillRect(0, H - 5, W, 3);
+    // chapter markers: blue book pips just under the era strip
+    for (const c of chronState.chapters) {
+      const x = yearToX(c.yearStart, W);
+      if (x < -2 || x > W + 2) continue;
+      ctx.fillStyle = '#639bff';
+      ctx.fillRect(Math.round(x) - 1, ERA_H + 1, 3, 4);
+    }
+    // category markers, clustered (11 §G2): one aggregated marker per bucket,
+    // sized by event count, colored by the bucket's most severe event.
+    // Adaptive floor keeps the full-history view to the biggest moments.
+    const span = tlSpan();
+    const spanYears = span.y1 - span.y0;
+    const minSev = spanYears > 400 ? 4 : spanYears > 150 ? 3 : 0;
+    const BUCKET = 5;
+    const buckets = new Map<number, { top: MajorEvent; count: number }>();
     for (const ev of majors) {
-      const x = (ev.tick / TICKS_PER_YEAR / span) * W;
-      const size = ev.severity >= 5 ? 6 : ev.severity === 4 ? 5 : 3;
-      ctx.fillStyle = ev.severity >= 4 ? '#d95763' : '#d9a066';
-      ctx.fillRect(Math.round(x) - size / 2, H - 10 - size, size, size);
+      if (ev.severity < minSev) continue;
+      const y = ev.tick / TICKS_PER_YEAR;
+      if (y < span.y0 || y > span.y1) continue;
+      const b = Math.floor(yearToX(y, W) / BUCKET);
+      const cur = buckets.get(b);
+      if (!cur) buckets.set(b, { top: ev, count: 1 });
+      else { cur.count++; if (ev.severity > cur.top.severity) cur.top = ev; }
+    }
+    for (const [b, { top, count }] of buckets) {
+      const size = Math.min(8, 2 + count + (top.severity >= 5 ? 2 : 0));
+      ctx.fillStyle = eventMeta(top.type).color;
+      const x = b * BUCKET + BUCKET / 2;
+      ctx.fillRect(Math.round(x - size / 2), H - 6 - size, size, size);
     }
     // cursor
-    const cx = (latest.tick / TICKS_PER_YEAR / span) * W;
-    ctx.fillStyle = '#639bff';
+    const cx = yearToX(latest.tick / TICKS_PER_YEAR, W);
+    ctx.fillStyle = '#cbdbfc';
     ctx.fillRect(Math.round(cx) - 1, 0, 3, H);
     // present marker while replaying
     if (latest.inPast) {
-      const px = (latest.presentYear / span) * W;
+      const px2 = yearToX(latest.presentYear, W);
       ctx.fillStyle = '#5fcde4';
-      ctx.fillRect(Math.round(px) - 1, 0, 2, H);
+      ctx.fillRect(Math.round(px2) - 1, 0, 2, H);
     }
   }
 
@@ -434,21 +491,64 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
     worker.postMessage({ t: 'seek', year });
   }
 
+  // zoom-exit chip + legend chip live next to the canvas
+  const tlExit = document.createElement('button');
+  tlExit.className = 'ctl';
+  tlExit.textContent = '⤺ all history';
+  tlExit.style.display = 'none';
+  tl.parentElement!.insertBefore(tlExit, tl);
+  tlExit.addEventListener('click', () => { tlZoom = null; tlExit.style.display = 'none'; });
+  const tlLegend = document.createElement('button');
+  tlLegend.className = 'ctl';
+  tlLegend.textContent = '?';
+  tlLegend.title = 'timeline legend';
+  tl.parentElement!.insertBefore(tlLegend, tl.nextSibling);
+  const legendPop = document.createElement('div');
+  legendPop.style.cssText = 'position:fixed;bottom:54px;right:120px;background:#1c1c2bf5;border:1px solid #34345230;' +
+    'border-radius:8px;padding:10px 14px;font-size:12px;z-index:22;display:none;line-height:1.7';
+  legendPop.innerHTML = '<b style="font-size:11px;color:#9badb7;letter-spacing:1px">TIMELINE LEGEND</b><br>' +
+    CATEGORY_LIST.map(c => `<span style="color:${CATEGORY_COLOR[c]}">■</span> ${c}`).join('<br>') +
+    '<br><span style="color:#639bff">■</span> chapter begins' +
+    '<br><span style="color:#5fcde4">|</span> the present (while replaying)' +
+    '<br>top strip: named eras · click an era to zoom into it';
+  document.body.appendChild(legendPop);
+  tlLegend.addEventListener('mouseenter', () => { legendPop.style.display = 'block'; });
+  tlLegend.addEventListener('mouseleave', () => { legendPop.style.display = 'none'; });
+  tlLegend.addEventListener('click', () => {
+    legendPop.style.display = legendPop.style.display === 'none' ? 'block' : 'none';
+  });
+
   tl.addEventListener('click', (e) => {
     const rect = tl.getBoundingClientRect();
-    const year = ((e.clientX - rect.left) / rect.width) * timelineSpanYears();
+    const year = xToYear(e.clientX - rect.left, rect.width);
+    // two-stage precision: clicking an era band zooms to its decades
+    if (e.clientY - rect.top < ERA_H && !tlZoom) {
+      const era = eraAt(year);
+      if (era) {
+        tlZoom = { y0: era.yearStart, y1: era.yearEnd };
+        tlExit.style.display = 'inline-block';
+        return;
+      }
+    }
     doSeek(year);
   });
   tl.addEventListener('mousemove', (e) => {
     const rect = tl.getBoundingClientRect();
-    const year = ((e.clientX - rect.left) / rect.width) * timelineSpanYears();
+    const year = xToYear(e.clientX - rect.left, rect.width);
     const nearTick = year * TICKS_PER_YEAR;
+    const span = tlSpan();
     let best: MajorEvent | null = null;
     for (const ev of majors) {
+      const y = ev.tick / TICKS_PER_YEAR;
+      if (y < span.y0 || y > span.y1) continue;
       if (!best || Math.abs(ev.tick - nearTick) < Math.abs(best.tick - nearTick)) best = ev;
     }
+    const era = eraAt(year);
+    const windowTicks = Math.max(4, (span.y1 - span.y0) * 0.03) * TICKS_PER_YEAR;
     tlTip.innerHTML = `<span class="yr">Year ${Math.floor(year)}</span>` +
-      (best && Math.abs(best.tick - nearTick) < 15 * TICKS_PER_YEAR ? `<br>${best.text}` : '');
+      (era ? ` <span style="color:${eraColor(era.idx)}">■</span> <span style="color:#9badb7">${era.name}</span>` : '') +
+      (best && Math.abs(best.tick - nearTick) < windowTicks
+        ? `<br><span style="color:${eventMeta(best.type).color}">${eventMeta(best.type).glyph}</span> ${best.text}` : '');
     tlTip.style.left = `${e.clientX}px`;
     (tlTip as HTMLElement).style.display = 'block';
   });

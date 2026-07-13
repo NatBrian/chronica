@@ -131,14 +131,16 @@
     .chain-arrow { color: var(--dim); flex-shrink: 0; }
     #timeline-bar { grid-area: timeline; background: var(--panel2); border-top: 1px solid var(--border);
       padding: 8px 12px; display: flex; align-items: center; gap: 12px; }
-    #timeline { flex: 1; height: 26px; cursor: pointer;
+    #timeline { flex: 1; height: 34px; cursor: pointer;
       background: #14141f; border-radius: 4px; }
     #tl-tooltip { position: fixed; bottom: 54px; background: #1c1c2bf2; border: 1px solid var(--border);
       border-radius: 6px; padding: 6px 10px; font-size: 12px; pointer-events: none;
       max-width: 300px; transform: translateX(-50%); z-index: 20; }
     #tl-tooltip .yr { color: var(--accent); font-weight: 600; }
     #replay-badge { background: var(--warn); color: #14141f; font-size: 11px; font-weight: 700;
-      padding: 2px 8px; border-radius: 3px; letter-spacing: 1px; }
+      padding: 2px 8px; border-radius: 3px; letter-spacing: 1px;
+      animation: replayPulse 1.2s ease-in-out infinite; }
+    @keyframes replayPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
     #seek-status { position: absolute; bottom: 90px; left: 50%; transform: translateX(-50%);
       background: #1c1c2bee; padding: 6px 16px; border-radius: 6px; border: 1px solid var(--border);
       color: var(--dim); display: none; }
@@ -274,7 +276,7 @@
       <button class="ctl speed" data-s="1" title="kings think deeply">1×</button>
       <button class="ctl speed active" data-s="4" title="kings think quickly">4×</button>
       <button class="ctl speed" data-s="16" title="kings rule by instinct">16×</button>
-      <canvas id="timeline" height="26"></canvas>
+      <canvas id="timeline" height="34"></canvas>
       <div id="tl-tooltip" style="display:none"></div>
       <span id="replay-badge" style="display:none">REPLAY</span>
       <button class="ctl" id="btn-present" style="display:none">Jump to present ▶▶</button>
