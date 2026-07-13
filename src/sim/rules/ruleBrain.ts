@@ -97,6 +97,12 @@ export function ruleBrainDecide(s: SimState, req: PendingDecision): DecisionResu
       }
       case 'DISBAND_SOLDIERS': score = s.wars.length === 0 && f.conscriptTarget > 0 ? 14 : -20; break;
       case 'CONSOLIDATE': score = 10; break;
+      case 'EXPAND': {
+        // prosperity founding: instinct kings do it when rich and at peace
+        const threatened = s.wars.some(w => w.attacker === fid || w.defender === fid);
+        score = 34 + (hungry ? -40 : 8) + (f.culture.wanderlust - 100) / 4 - (threatened ? 22 : 0);
+        break;
+      }
       case 'TAKE_TRIBUTE': score = 25 + (hungry ? 20 : 0); break;
       case 'SHIFT_BORDER': score = 22 + (f.culture.aggression - 110) / 4; break;
       case 'VASSALIZE': score = 18 + (myArmy > theirArmy * 2 ? 14 : -6); break;
@@ -135,6 +141,7 @@ function templateReasoning(king: string, choice: string, factionName: string): s
     CONSCRIPT: `${king} calls the young to the mustering field.`,
     DISBAND_SOLDIERS: `${king} sends the soldiers home to their fields.`,
     CONSOLIDATE: `${king} tends the hearth and bides.`,
+    EXPAND: `${king} looks past full granaries to empty horizons. New roofs will rise.`,
     TAKE_TRIBUTE: `${king} takes the victor's due.`,
     SHIFT_BORDER: `${king} redraws the border in the victor's ink.`,
     VASSALIZE: `${king} spares the defeated; as servants.`,

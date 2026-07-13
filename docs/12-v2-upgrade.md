@@ -150,7 +150,7 @@ Exit criteria:
 ### M8 : the empire cycle
 Build: prosperity expansion + EXPAND council option (11 §F fix candidates 1+3; touch `factionSystem.ts considerExpansion`, `decisions.ts councilOptions/applyDecision`, `ruleBrain.ts`), loyalty system (P1.2: new per-settlement field + legible modifier list in inspector; rebellion trigger reads loyalty), war goals + capture progress (P1.5: `War` gains objective; sieges tick capture bar; surface in war strip 11 §A3), war visuals (11 §A1-A5).
 Exit criteria:
-- Seed 42, 300y: settlement count grows from 4 to >= 8; at least one faction founds >= 2 settlements; no extinction; test added.
+- Seed 42, 300y: settlement count grows from 4 to >= 8; at least one faction founds >= 2 settlements; no extinction beyond the v1 baseline (doc 10 §B1: seed-42 dwarves die ~Y160 in v1.0 too; gate = no extinction before Y60, >= 3 races at 300y); test added.
 - Settlement inspector lists signed loyalty modifiers summing to the displayed total.
 - Every war in a 300y run has a stated objective and ends by objective/exhaustion/peace (no perpetual wars); battles render banner units + clash VFX at 1x.
 - Soak green, golden seeds re-baselined in final commit, perf >= 2000 t/s.

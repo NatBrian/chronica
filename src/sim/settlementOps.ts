@@ -1,9 +1,122 @@
-// Settlement-level planning: building sites, farm-plot expansion, prospecting.
-// Runs from the periodic refresh (deterministic, index-ordered).
-import { BuildingKind, EventType, Good } from '../shared/types';
-import { SimState, Settlement } from './state';
+// Settlement-level planning: building sites, farm-plot expansion, prospecting,
+// and settlement founding (M8: shared by auto-expansion and the EXPAND council
+// option). Runs from the periodic refresh (deterministic, index-ordered).
+import { BuildingKind, EventType, Good, GOOD_COUNT } from '../shared/types';
+import { SimState, Settlement, Faction, PawnFlag } from './state';
 import { TileFlag, isPassable } from './world/map';
 import { emitEvent, yearOf } from './events/events';
+import { settlementName } from './world/names';
+import { promoteNamed } from './namedOps';
+
+/** Land-based carrying capacity (03 §soft capacity); the crowding source. */
+export function settlementCapacity(st: Settlement): number {
+  const rt = st.resourceTiles;
+  return ((st.fertileLand * 9) / 10 | 0) + rt.hunt.length * 3 +
+    rt.fish.length * 4 + rt.forage.length * 2 + 6;
+}
+
+export function crowdPctOf(st: Settlement): number {
+  return (st.popCache * 100 / settlementCapacity(st)) | 0;
+}
+
+/** Prosperity charter (11 §F fix 1): rich, comfortable villages plant
+ *  daughters; no need to starve first. Gates the EXPAND council option. */
+export function canProsperExpand(st: Settlement): boolean {
+  return crowdPctOf(st) >= 60 &&
+    st.stockpile[Good.Grain] >= (st.granaryCap * 8) / 10 &&
+    st.stockpile[Good.Wood] >= 60 &&
+    st.popCache >= 120;
+}
+
+/** Score frontier sites near `from`: fertile, far from every settlement.
+ *  16-direction integer table ×1000; Math.sin/cos are engine-dependent (01). */
+const DIR16: readonly (readonly [number, number])[] = [
+  [1000, 0], [924, 383], [707, 707], [383, 924], [0, 1000], [-383, 924],
+  [-707, 707], [-924, 383], [-1000, 0], [-924, -383], [-707, -707],
+  [-383, -924], [0, -1000], [383, -924], [707, -707], [924, -383],
+];
+
+export function findExpansionSite(s: SimState, from: Settlement): [number, number] | null {
+  const N = s.map.size;
+  const rng = s.rng.get('expansion');
+  let best: [number, number] | null = null;
+  let bestScore = 0;
+  for (let attempt = 0; attempt < 40; attempt++) {
+    const [ddx, ddy] = DIR16[rng.int(16)];
+    const dist = 28 + rng.int(24);
+    const x = from.x + ((dist * ddx / 1000) | 0);
+    const y = from.y + ((dist * ddy / 1000) | 0);
+    if (x < 8 || y < 8 || x >= N - 8 || y >= N - 8) continue;
+    const i = y * N + x;
+    if (!isPassable(s.map, i)) continue;
+    let tooClose = false;
+    for (const st of s.settlements) {
+      if (st.razed) continue;
+      const dx = st.x - x, dy = st.y - y;
+      if (dx * dx + dy * dy < 22 * 22) { tooClose = true; break; }
+    }
+    if (tooClose) continue;
+    let fert = 0;
+    for (let dy = -6; dy <= 6; dy++) {
+      for (let dx = -6; dx <= 6; dx++) {
+        const xx = x + dx, yy = y + dy;
+        if (xx < 0 || yy < 0 || xx >= N || yy >= N) continue;
+        fert += s.map.fertility[yy * N + xx];
+      }
+    }
+    if (fert > bestScore) { bestScore = fert; best = [x, y]; }
+  }
+  return bestScore >= 8000 ? best : null;
+}
+
+export function foundSettlement(s: SimState, f: Faction, from: Settlement, x: number, y: number): void {
+  const rng = s.rng.get('expansion');
+  const st: Settlement = {
+    id: s.settlements.length,
+    factionId: f.id,
+    x, y,
+    name: settlementName(f.race, rng),
+    stockpile: new Array(GOOD_COUNT).fill(0),
+    buildings: [{ kind: 1, x, y, stage: 3, hp: 200, workDone: 0 }],
+    farmPlots: [],
+    founded: s.tick,
+    razed: false,
+    granaryCap: 4000, popCache: 0, moodAvg: 150, crowding: 0,
+    loyalty: 100, capturedTick: -1,
+    foodPerCapitaAvg: 22000, foodFlowAvg: 0, lastFoodStock: 300, lodStatistical: false,
+    resourceTiles: { forage: [], hunt: [], fish: [], wood: [], mine: [], stone: [] },
+    fertileLand: 40,
+  };
+  from.stockpile[Good.Wood] -= 60;
+  from.stockpile[Good.Grain] -= 300;
+  st.stockpile[Good.Grain] = 300;
+  st.stockpile[Good.Wood] = 40;
+  s.settlements.push(st);
+  // founding party: ~14 pawns walk over (reuses movement)
+  const N = s.map.size;
+  let moved = 0, founderPawn = -1;
+  for (let i = 0; i < s.pawnCount && moved < 14; i++) {
+    const fl = s.pawns.flags[i];
+    if (!(fl & PawnFlag.Alive) || (fl & PawnFlag.Child)) continue;
+    if (s.pawns.settlementId[i] !== from.id) continue;
+    if (s.pawns.squadId[i] !== 65535 || s.pawns.namedId[i] >= 0) continue;
+    s.pawns.settlementId[i] = st.id;
+    s.pawns.actionTarget[i] = y * N + x;
+    s.pawns.action[i] = 20;   // SettleNewVillage; walks to the new home
+    s.pawns.actionTicks[i] = 2;
+    if (founderPawn < 0) founderPawn = i;
+    moved++;
+  }
+  const ev = emitEvent(s, {
+    type: EventType.SettlementFounded,
+    factions: [f.id], x, y, severity: 3,
+    text: `Y${yearOf(s.tick)}: Settlers from ${from.name} raise the first roofs of ${st.name}.`,
+  });
+  if (founderPawn >= 0) {
+    const nc = promoteNamed(s, founderPawn, 'founder', `Founded ${st.name}.`, [ev.id]);
+    if (nc) nc.bio.push(`First of ${st.name}.`);
+  }
+}
 
 export function ringSpots(s: SimState, cx: number, cy: number, rMax: number): [number, number][] {
   const out: [number, number][] = [];

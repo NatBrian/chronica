@@ -3,7 +3,7 @@
 import { ActionId, BuildingKind, EventType, Good, Season } from '../../shared/types';
 import { PawnFlag, SimState, Settlement, effFood } from '../state';
 import { TileFlag } from '../world/map';
-import { planSettlement } from '../settlementOps';
+import { planSettlement, settlementCapacity } from '../settlementOps';
 import { getField, fieldDist } from '../world/flowField';
 import { emitEvent, yearOf } from '../events/events';
 import { seasonOf } from './calendarSystem';
@@ -324,12 +324,7 @@ export function utilityAISystem(s: SimState): void {
       st.foodFlowAvg += ((Math.max(-40000, Math.min(40000, flow)) - st.foodFlowAvg) / 12) | 0;
       // crowding vs the land's carrying capacity (03 §soft capacity):
       // how many mouths can farms + hunting + fishing + foraging feed here?
-      const rt = st.resourceTiles;
-      // land-based, pop-independent: fertile tiles ≈ 1 mouth each (farming),
-      // plus sustainable hunt/fish/forage; no feedback through claimed plots
-      const capacity = ((st.fertileLand * 9) / 10 | 0) + rt.hunt.length * 3 +
-        rt.fish.length * 4 + rt.forage.length * 2 + 6;
-      const crowdPct = (st.popCache * 100 / capacity) | 0;
+      const crowdPct = (st.popCache * 100 / settlementCapacity(st)) | 0;
       st.crowding = crowdPct > 80 ? Math.min(255, (crowdPct - 80) * 5) : 0;
     }
   }

@@ -12,11 +12,8 @@ import {
 import { emitEvent, yearOf } from '../events/events';
 import { promoteNamed } from '../namedOps';
 import { RACE_TABLE } from '../raceData';
-import { spawnPawn } from '../pawnOps';
-import { ringSpots } from '../settlementOps';
-import { settlementName } from '../world/names';
-import { TileFlag, isPassable } from '../world/map';
-import { GOOD_COUNT } from '../../shared/types';
+import { findExpansionSite, foundSettlement } from '../settlementOps';
+import { computeLoyalty } from '../rules/loyalty';
 
 export function factionSystem(s: SimState): void {
   if (s.wars.length > 0) s.warTicksThisYear++;
@@ -44,6 +41,10 @@ export function factionSystem(s: SimState): void {
       payTribute(s, f.id, f.vassalOf, 'tribute');          // vassal dues (04)
     }
     if (phase === 90) {
+      // yearly loyalty refresh (P1.2), then the trigger reads it
+      for (const st of s.settlements) {
+        if (!st.razed && st.factionId === f.id) st.loyalty = computeLoyalty(s, st);
+      }
       checkRebellion(s, f);
     }
 
@@ -273,97 +274,17 @@ function manageCampaign(s: SimState, attackerId: number, w: import('../state').W
 }
 
 function considerExpansion(s: SimState, f: Faction): void {
+  // Automatic path: crowding pressure only (survival). Prosperity founding is
+  // the king's call via the EXPAND council option (11 §F fixes 1+3); RuleBrain
+  // reliably picks it when rich, so instinct kings expand too.
   const mySettlements = s.settlements.filter(st => !st.razed && st.factionId === f.id);
   if (mySettlements.length === 0 || mySettlements.length >= 4) return;
   const crowded = mySettlements.find(st => st.crowding > 100 && st.popCache > 45);
   if (!crowded) return;
   if (crowded.stockpile[Good.Wood] < 60 || crowded.stockpile[Good.Grain] < 250) return;
-  // score frontier sites: fertile, far from every settlement
-  const N = s.map.size;
-  const rng = s.rng.get('expansion');
-  let best: [number, number] | null = null;
-  let bestScore = 0;
-  // 16-direction integer table ×1000; Math.sin/cos are engine-dependent (01)
-  const DIR16: readonly (readonly [number, number])[] = [
-    [1000, 0], [924, 383], [707, 707], [383, 924], [0, 1000], [-383, 924],
-    [-707, 707], [-924, 383], [-1000, 0], [-924, -383], [-707, -707],
-    [-383, -924], [0, -1000], [383, -924], [707, -707], [924, -383],
-  ];
-  for (let attempt = 0; attempt < 40; attempt++) {
-    const [ddx, ddy] = DIR16[rng.int(16)];
-    const dist = 28 + rng.int(24);
-    const x = crowded.x + ((dist * ddx / 1000) | 0);
-    const y = crowded.y + ((dist * ddy / 1000) | 0);
-    if (x < 8 || y < 8 || x >= N - 8 || y >= N - 8) continue;
-    const i = y * N + x;
-    if (!isPassable(s.map, i)) continue;
-    let tooClose = false;
-    for (const st of s.settlements) {
-      if (st.razed) continue;
-      const dx = st.x - x, dy = st.y - y;
-      if (dx * dx + dy * dy < 22 * 22) { tooClose = true; break; }
-    }
-    if (tooClose) continue;
-    let fert = 0;
-    for (let dy = -6; dy <= 6; dy++) {
-      for (let dx = -6; dx <= 6; dx++) {
-        const xx = x + dx, yy = y + dy;
-        if (xx < 0 || yy < 0 || xx >= N || yy >= N) continue;
-        fert += s.map.fertility[yy * N + xx];
-      }
-    }
-    if (fert > bestScore) { bestScore = fert; best = [x, y]; }
-  }
-  if (!best || bestScore < 8000) return;
-  foundSettlement(s, f, crowded, best[0], best[1]);
-}
-
-function foundSettlement(s: SimState, f: Faction, from: Settlement, x: number, y: number): void {
-  const rng = s.rng.get('expansion');
-  const st: Settlement = {
-    id: s.settlements.length,
-    factionId: f.id,
-    x, y,
-    name: settlementName(f.race, rng),
-    stockpile: new Array(GOOD_COUNT).fill(0),
-    buildings: [{ kind: 1, x, y, stage: 3, hp: 200, workDone: 0 }],
-    farmPlots: [],
-    founded: s.tick,
-    razed: false,
-    granaryCap: 4000, popCache: 0, moodAvg: 150, crowding: 0,
-    foodPerCapitaAvg: 22000, foodFlowAvg: 0, lastFoodStock: 300, lodStatistical: false,
-    resourceTiles: { forage: [], hunt: [], fish: [], wood: [], mine: [], stone: [] },
-      fertileLand: 40,
-  };
-  from.stockpile[Good.Wood] -= 60;
-  from.stockpile[Good.Grain] -= 300;
-  st.stockpile[Good.Grain] = 300;
-  st.stockpile[Good.Wood] = 40;
-  s.settlements.push(st);
-  // founding party: ~14 pawns walk over (reuses movement)
-  const N = s.map.size;
-  let moved = 0, founderPawn = -1;
-  for (let i = 0; i < s.pawnCount && moved < 14; i++) {
-    const fl = s.pawns.flags[i];
-    if (!(fl & PawnFlag.Alive) || (fl & PawnFlag.Child)) continue;
-    if (s.pawns.settlementId[i] !== from.id) continue;
-    if (s.pawns.squadId[i] !== 65535 || s.pawns.namedId[i] >= 0) continue;
-    s.pawns.settlementId[i] = st.id;
-    s.pawns.actionTarget[i] = y * N + x;
-    s.pawns.action[i] = 20;   // SettleNewVillage; walks to the new home
-    s.pawns.actionTicks[i] = 2;
-    if (founderPawn < 0) founderPawn = i;
-    moved++;
-  }
-  const ev = emitEvent(s, {
-    type: EventType.SettlementFounded,
-    factions: [f.id], x, y, severity: 3,
-    text: `Y${yearOf(s.tick)}: Settlers from ${from.name} raise the first roofs of ${st.name}.`,
-  });
-  if (founderPawn >= 0) {
-    const nc = promoteNamed(s, founderPawn, 'founder', `Founded ${st.name}.`, [ev.id]);
-    if (nc) nc.bio.push(`First of ${st.name}.`);
-  }
+  const site = findExpansionSite(s, crowded);
+  if (!site) return;
+  foundSettlement(s, f, crowded, site[0], site[1]);
 }
 
 function checkRebellion(s: SimState, f: Faction): void {
@@ -385,16 +306,14 @@ function checkRebellion(s: SimState, f: Faction): void {
     }
     return;
   }
-  // settlement rebellion → faction split (bigness rots; 04)
+  // settlement rebellion → faction split (bigness rots; 04). The trigger
+  // reads the legible loyalty score (P1.2), not an opaque mood+distance rule.
   if (s.factions.filter(x => !x.extinct).length >= MAX_FACTIONS) return;
   const mySettlements = s.settlements.filter(st => !st.razed && st.factionId === f.id);
   if (mySettlements.length < 3) return;
-  const cap = s.settlements[f.capital];
   for (const st of mySettlements) {
-    if (st.id === f.capital || !cap) continue;
-    const dx = st.x - cap.x, dy = st.y - cap.y;
-    const dist = Math.sqrt(dx * dx + dy * dy);
-    if (st.moodAvg < 95 && dist > 45 && st.popCache > 50) {
+    if (st.id === f.capital) continue;
+    if (st.loyalty <= 20 && st.popCache > 50) {
       splitFaction(s, f, st);
       break;
     }
@@ -426,6 +345,8 @@ function splitFaction(s: SimState, parent: Faction, st: Settlement): void {
   };
   s.factions.push(nf);
   st.factionId = nf.id;
+  st.loyalty = 100;                // its own banner now
+  st.capturedTick = -1;
   for (let i = 0; i < s.pawnCount; i++) {
     if (!(s.pawns.flags[i] & PawnFlag.Alive)) continue;
     if (s.pawns.settlementId[i] === st.id) s.pawns.factionId[i] = nf.id;

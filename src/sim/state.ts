@@ -81,6 +81,14 @@ export interface Settlement {
   popCache: number;
   moodAvg: number;
   crowding: number;           // 0..255 soft pressure
+  /** 0..150 allegiance to its faction (M8, P1.2); low arms rebellion.
+   *  Recomputed yearly from legible modifiers (rules/loyalty.ts). */
+  loyalty: number;
+  /** tick this settlement last changed hands by conquest; -1 = never (P1.2) */
+  capturedTick: number;
+  /** a wiped garrison cannot re-form until this tick (P1.5): sieges progress
+   *  between defender waves instead of stalling forever */
+  garrisonCooldownUntil?: number;
   foodPerCapitaAvg: number;   // rolling stock per capita ×1000 (fixed point)
   foodFlowAvg: number;        // rolling net flow per capita per year ×1000 (can be negative)
   lastFoodStock: number;      // previous window's total food (flow measurement)
@@ -112,6 +120,9 @@ export interface War {
   targetSettlement: number;
   bothAggressors?: boolean;   // D4 mutual declaration
   musterCooldownUntil?: number; // campaigns pace out; no raid conveyor
+  /** 0..100 siege progress at targetSettlement (M8, P1.5); stalls while
+   *  defenders stand: reads as "the walls hold" (WorldBox stall rule). */
+  captureProgress?: number;
 }
 
 export interface Faction {
@@ -157,7 +168,7 @@ export interface Squad {
   targetX: number; targetY: number;
   members: number[];          // pawn indices
   morale: number;             // 0..255
-  state: 'muster' | 'march' | 'fight' | 'rout' | 'defend' | 'disband';
+  state: 'muster' | 'march' | 'fight' | 'siege' | 'rout' | 'defend' | 'disband';
   warId: number;
   homeSettlement: number;
   pathIdx: number;
@@ -344,6 +355,11 @@ export function restore(s: SimState, snap: Snapshot): void {
   s.rng.restore(c.rngStreams);
   s.pawnCount = c.pawnCount; s.alivePawns = c.alivePawns; s.birthsDeferred = c.birthsDeferred;
   s.settlements = c.settlements; s.factions = c.factions; s.pairs = c.pairs;
+  // saves from before M8 lack loyalty fields; default them (P1.2)
+  for (const st of s.settlements) {
+    if (st.loyalty === undefined) st.loyalty = 100;
+    if (st.capturedTick === undefined) st.capturedTick = -1;
+  }
   s.named = c.named; s.namedActive = c.namedActive;
   s.squads = c.squads; s.caravans = c.caravans; s.monsters = c.monsters; s.wars = c.wars;
   s.nextEventId = c.nextEventId; s.nextEntityId = c.nextEntityId;

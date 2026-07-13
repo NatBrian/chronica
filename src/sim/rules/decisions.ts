@@ -11,6 +11,7 @@ import {
 import { emitEvent, recentEvents, yearOf } from '../events/events';
 import { seasonOf } from '../systems/calendarSystem';
 import { RACE_TABLE } from '../raceData';
+import { canProsperExpand, findExpansionSite, foundSettlement } from '../settlementOps';
 
 export function livingFactions(s: SimState): Faction[] {
   return s.factions.filter(f => !f.extinct);
@@ -119,6 +120,11 @@ export function councilOptions(s: SimState, fid: number): string[] {
     }
   }
   opts.push('CONSCRIPT', 'DISBAND_SOLDIERS', 'RESERVE_STORES');
+  // EXPAND (11 §F fix 3): kings charter daughter villages from prosperity
+  const mine = s.settlements.filter(st => !st.razed && st.factionId === fid);
+  if (mine.length > 0 && mine.length < 4 && mine.some(st => canProsperExpand(st))) {
+    opts.push('EXPAND');
+  }
   return [...new Set(opts)];
 }
 
@@ -411,6 +417,19 @@ export function applyDecision(s: SimState, entry: JournalEntry): void {
       f.reserveStores = false;
       break;
     }
+    case 'EXPAND': {
+      // charter a new village from the most prosperous settlement (11 §F)
+      const from = s.settlements
+        .filter(st => !st.razed && st.factionId === fid && canProsperExpand(st))
+        .sort((a, b) => b.popCache - a.popCache)[0];
+      const count = s.settlements.filter(st => !st.razed && st.factionId === fid).length;
+      if (!from || count >= 4) return;
+      const site = findExpansionSite(s, from);
+      if (!site) return;
+      foundSettlement(s, f, from, site[0], site[1]);
+      addMemory(`we chartered a new village beyond ${from.name}`, true, 7);
+      break;
+    }
     // post-war terms
     case 'TAKE_TRIBUTE': case 'SHIFT_BORDER': case 'VASSALIZE': case 'RAZE': {
       applyPostWarTerms(s, fid, entry, op);
@@ -658,6 +677,7 @@ function applyPostWarTerms(s: SimState, victor: number, entry: JournalEntry, op:
       const st = s.settlements.find(x => !x.razed && x.factionId === loser);
       if (st) {
         st.factionId = victor;
+        st.capturedTick = s.tick;                            // conquered folk remember (P1.2)
         emitEvent(s, {
           type: EventType.BorderShifted, factions: [victor, loser],
           x: st.x, y: st.y, severity: 3,

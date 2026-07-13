@@ -43,7 +43,7 @@ interface WorkerSnapshot {
   factions?: { id: number; race: number; name: string; extinct?: boolean; capital?: number }[];
   wars?: { id: number; attacker: number; defender: number; objective: string; startTick: number }[];
   pairs?: { a: number; b: number; diplo: number; grudge: number }[];
-  squads?: { x: number; y: number; factionId: number; state: string; n: number }[];
+  squads?: { x: number; y: number; factionId: number; state: string; n: number; morale?: number; warId?: number }[];
   caravans?: { x: number; y: number; factionId: number; purpose: string }[];
   monsters?: { x: number; y: number; kind: string }[];
   eventsTail: { text: string; severity: number }[];
@@ -249,7 +249,10 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
         renderCouncils();
         break;
       case 'searchIndex': searchIndexArrived(msg); break;
-      case 'inspection': showInspector(msg.pawn); break;
+      case 'inspection':
+        if (msg.settlement) showSettlementInspector(msg.settlement);
+        else showInspector(msg.pawn);
+        break;
       case 'seeked': {
         seekStatus.style.display = 'none';
         setReplayUI(msg.inPast);
@@ -607,6 +610,30 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
     });
   }
 
+  // ---- settlement inspector (M8, P1.2): the loyalty list IS the score ----
+  function showSettlementInspector(st: any): void {
+    const fcol = FACTION_COLORS[st.factionId] ?? '#fff';
+    const modRow = (m: { label: string; value: number }) =>
+      `<div class="lbl" style="margin:2px 0"><span>${m.label}</span>` +
+      `<span style="color:${m.value >= 0 ? '#6abe30' : '#d95763'}">${m.value >= 0 ? '+' : ''}${m.value}</span></div>`;
+    const loyColor = st.loyalty > 70 ? '#6abe30' : st.loyalty > 35 ? '#d9a066' : '#d95763';
+    inspectorEl.innerHTML = `
+      <span class="close" id="insp-close">✕</span>
+      <h4><span style="color:${fcol}">■</span> ${st.name}${st.capital ? ' 👑' : ''}</h4>
+      <div class="lbl"><span>${st.factionName}</span><span>founded Y${st.foundedYear}</span></div>
+      <div class="lbl" style="margin:4px 0"><span>${st.pop} souls</span><span>${st.food} food · ${st.wood} wood</span></div>
+      <div style="margin:10px 0 4px;color:#9badb7;font-size:12px">loyalty:
+        <b style="color:${loyColor}">${st.loyalty}</b></div>
+      <div class="bar"><div style="width:${Math.min(100, st.loyalty / 1.5)}%;background:${loyColor}"></div></div>
+      ${st.loyaltyMods.map(modRow).join('')}
+      ${st.loyalty <= 20 ? '<div style="color:#d95763;font-size:12px;margin-top:6px">⚠ rebellion stirs in the alleys</div>' : ''}
+    `;
+    inspectorEl.style.display = 'block';
+    document.getElementById('insp-close')!.addEventListener('click', () => {
+      inspectorEl.style.display = 'none';
+    });
+  }
+
   // ---- council panel + decision toasts (07 §4, shareable moment #1) ----
   const councilPanel = document.getElementById('council-panel')!;
   const toastStack = document.getElementById('toast-stack')!;
@@ -902,6 +929,43 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
       chip.appendChild(spark);
       chip.addEventListener('click', () => openRail('stats'));
       hudFactions.appendChild(chip);
+    }
+  }
+
+  // ---- war status strip (11 §A3) ----
+  const warStrip = document.getElementById('war-strip')!;
+  let warStripKey = '';
+  function renderWarStrip(): void {
+    if (!latest) return;
+    const wars = latest.wars ?? [];
+    const squads = latest.squads ?? [];
+    const key = wars.map(w => `${w.id}:${(w as any).captureProgress ?? 0}:${squads.length}`).join(',');
+    if (key === warStripKey) return;
+    warStripKey = key;
+    warStrip.innerHTML = '';
+    for (const w of wars) {
+      const an = latest.factions?.[w.attacker]?.name ?? '?';
+      const dn = latest.factions?.[w.defender]?.name ?? '?';
+      const aTroops = squads.filter(q => q.factionId === w.attacker).reduce((a, q) => a + q.n, 0);
+      const dTroops = squads.filter(q => q.factionId === w.defender).reduce((a, q) => a + q.n, 0);
+      const cap = (w as any).captureProgress ?? 0;
+      const row = document.createElement('div');
+      row.className = 'war-row';
+      row.innerHTML =
+        `<div class="hd"><span>⚔ <span style="color:${FACTION_COLORS[w.attacker]}">${an}</span>` +
+        ` vs <span style="color:${FACTION_COLORS[w.defender]}">${dn}</span></span>` +
+        `<span style="color:#9badb7">goal: ${w.objective}</span></div>` +
+        (cap > 0 ? `<div class="cap"><div style="width:${cap}%"></div></div>` : '') +
+        `<div class="armies"><span>${aTroops} marching</span><span>${dTroops} defending</span></div>`;
+      row.addEventListener('click', () => {
+        // jump to the hottest point: a battle, else a marching banner, else target
+        const hot = squads.find(q => q.state === 'fight' && (q.factionId === w.attacker || q.factionId === w.defender))
+          ?? squads.find(q => (q as any).warId === w.id);
+        const tgt = latest!.settlements.find(st2 => st2.id === (w as any).targetSettlement);
+        const to = hot ?? tgt;
+        if (to) flyTarget = { x: to.x, y: to.y };
+      });
+      warStrip.appendChild(row);
     }
   }
 
@@ -1523,6 +1587,7 @@ ${parts.join('\n')}</body>`;
       legendWarCount = latest.wars?.length ?? 0;
       updateOverlayLegend();
     }
+    renderWarStrip();
     requestAnimationFrame(frame);
   }
 
@@ -1567,18 +1632,62 @@ ${parts.join('\n')}</body>`;
         ctx.fillText(st.name, Math.round(sx + r), Math.round(sy - 4));
       }
     }
-    // squads: banner markers; caravans: wagon dots; monsters: big glyphs (M6)
+    // squads as banner units (11 §A1): faction flag, morale = flag fullness,
+    // soldier-count badge; battle dust + swords at engagements (A2)
     if (detailAlpha > 0.01) for (const sq of latest.squads ?? []) {
       const [sx, sy] = cam.worldToScreen(sq.x, sq.y);
-      if (sx < -20 || sy < -20 || sx > cam.viewW + 20 || sy > cam.viewH + 20) continue;
-      ctx.fillStyle = FACTION_COLORS[sq.factionId] ?? '#fff';
-      const h2 = Math.max(6, cam.pxPerTile * 0.8);
+      if (sx < -30 || sy < -30 || sx > cam.viewW + 30 || sy > cam.viewH + 30) continue;
+      const h2 = Math.max(10, cam.pxPerTile * 0.9);
+      const morale01 = Math.min(1, (sq.morale ?? 235) / 235);
+      ctx.fillStyle = '#1a1c2c';
       ctx.fillRect(Math.round(sx), Math.round(sy - h2), 2, Math.round(h2));
-      ctx.fillRect(Math.round(sx + 2), Math.round(sy - h2), Math.round(h2 * 0.6), Math.round(h2 * 0.35));
-      if (sq.state === 'fight' && cam.pxPerTile >= 4) {
+      ctx.fillStyle = FACTION_COLORS[sq.factionId] ?? '#fff';
+      // a fresh host flies a full flag; a shaken one, a tattered sliver
+      ctx.fillRect(Math.round(sx + 2), Math.round(sy - h2),
+        Math.round(Math.max(3, h2 * 0.7 * morale01)), Math.round(h2 * 0.35));
+      ctx.font = '10px system-ui';
+      ctx.fillStyle = '#14141fc8';
+      const cnt = String(sq.n);
+      ctx.fillRect(Math.round(sx) - 2, Math.round(sy) + 2, ctx.measureText(cnt).width + 5, 12);
+      ctx.fillStyle = '#cbdbfc';
+      ctx.fillText(cnt, Math.round(sx), Math.round(sy) + 11);
+      if (sq.state === 'fight') {
+        // dust of battle: breathing haze under the clash icon
+        const puff = 6 + 3 * Math.sin(performance.now() / 180 + sq.x);
+        ctx.globalAlpha = 0.28;
+        ctx.fillStyle = '#847e87';
+        ctx.beginPath(); ctx.arc(sx + 4, sy - 2, puff + 6, 0, 7); ctx.fill();
+        ctx.globalAlpha = 1;
         ctx.font = `${Math.max(12, cam.pxPerTile)}px system-ui`;
         ctx.fillText('⚔️', sx - 6, sy - h2 - 2);
       }
+      if (sq.state === 'siege') {
+        ctx.font = `${Math.max(12, cam.pxPerTile * 0.8)}px system-ui`;
+        ctx.fillText('🏰', sx - 6, sy - h2 - 2);
+      }
+    }
+    // aftermath (11 §A5): razed sites smolder for ~2 years of sim time,
+    // derived from the event log so time-machine scrubs replay the smoke
+    if (detailAlpha > 0.01) for (const ev of majors) {
+      if (ev.type !== 3) continue;                       // SettlementRazed
+      const age = latest.tick - ev.tick;
+      if (age < 0 || age > 2 * TICKS_PER_YEAR) continue;
+      const [sx, sy] = cam.worldToScreen(ev.x + 0.5, ev.y + 0.5);
+      if (sx < -40 || sy < -40 || sx > cam.viewW + 40 || sy > cam.viewH + 40) continue;
+      const fade = 1 - age / (2 * TICKS_PER_YEAR);
+      ctx.globalAlpha = 0.5 * fade;
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(Math.round(sx - cam.pxPerTile * 2), Math.round(sy - cam.pxPerTile), Math.round(cam.pxPerTile * 4), Math.round(cam.pxPerTile * 2));
+      for (let p = 0; p < 3; p++) {
+        const t = (performance.now() / 900 + p * 0.33) % 1;
+        ctx.globalAlpha = 0.4 * fade * (1 - t);
+        ctx.fillStyle = '#222034';
+        const r = 3 + t * 7;
+        ctx.beginPath();
+        ctx.arc(sx + (p - 1) * 6 + Math.sin(t * 6 + p) * 3, sy - 6 - t * 26, r, 0, 7);
+        ctx.fill();
+      }
+      ctx.globalAlpha = detailAlpha;
     }
     for (const c of latest.caravans ?? []) {
       const [sx, sy] = cam.worldToScreen(c.x, c.y);

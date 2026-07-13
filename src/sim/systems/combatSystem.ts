@@ -26,8 +26,12 @@ export function combatSystem(s: SimState): void {
       Math.max(Math.abs(sq.x - st.x), Math.abs(sq.y - st.y)) <= 10);
     if (!threat) continue;
     const hasGarrison = s.squads.some(sq =>
-      sq.factionId === st.factionId && sq.homeSettlement === st.id && sq.state === 'defend');
+      sq.factionId === st.factionId && sq.homeSettlement === st.id &&
+      (sq.state === 'defend' || sq.state === 'fight') && sq.warId < 0);
     if (hasGarrison) continue;
+    // a broken garrison needs a season to rally another (P1.5): the pause is
+    // when a siege's capture bar actually moves
+    if (st.garrisonCooldownUntil !== undefined && s.tick < st.garrisonCooldownUntil) continue;
     const members: number[] = [];
     for (let i = 0; i < s.pawnCount && members.length < 34; i++) {
       const fl = s.pawns.flags[i];
@@ -89,8 +93,33 @@ export function combatSystem(s: SimState): void {
         const enemy = findEngagement(s, sq);
         if (enemy) { engage(s, sq, enemy); }
         else if (Math.max(Math.abs(sq.x - sq.targetX), Math.abs(sq.y - sq.targetY)) <= 2) {
-          // arrived at objective with no defenders standing
-          resolveObjective(s, sq);
+          // arrived at the objective: the siege begins (P1.5)
+          beginSiege(s, sq);
+        }
+        break;
+      }
+      case 'siege': {
+        for (const m of sq.members) setSoldierTarget(s, m, sq.x, sq.y);
+        const enemy = findEngagement(s, sq);
+        if (enemy) { engage(s, sq, enemy); break; }
+        const w = s.wars.find(w2 => w2.id === sq.warId);
+        if (!w) { sq.state = 'disband'; break; }
+        const target = s.settlements[w.targetSettlement];
+        if (!target || target.razed || target.factionId !== w.defender) {
+          sq.state = 'disband';
+          break;
+        }
+        // capture stalls while any defender stands nearby: the walls hold
+        const defendersHold = s.squads.some(o =>
+          o.id !== sq.id && o.state !== 'disband' && o.state !== 'rout' &&
+          isHostile(s, sq.factionId, o.factionId) &&
+          Math.max(Math.abs(o.x - sq.x), Math.abs(o.y - sq.y)) <= 8);
+        if (!defendersHold && s.tick % 2 === 0) {
+          w.captureProgress = (w.captureProgress ?? 0) + 1;
+          if (w.captureProgress >= 100) {
+            w.captureProgress = 0;
+            resolveObjective(s, sq);
+          }
         }
         break;
       }
@@ -110,7 +139,7 @@ export function combatSystem(s: SimState): void {
           if (sq.warId >= 0) {
             const w = s.wars.find(w2 => w2.id === sq.warId);
             if (w && Math.max(Math.abs(sq.x - sq.targetX), Math.abs(sq.y - sq.targetY)) <= 4) {
-              resolveObjective(s, sq);
+              beginSiege(s, sq);                             // walls next (P1.5)
             } else {
               sq.state = 'march';
             }
@@ -138,6 +167,11 @@ export function combatSystem(s: SimState): void {
   // release disbanded members, deposit raided goods, drop squads
   for (const sq of s.squads) {
     if (sq.state !== 'disband') continue;
+    if (sq.warId < 0) {
+      // defense squad ends (wiped or threat gone): rally cooldown (P1.5)
+      const home = s.settlements[sq.homeSettlement];
+      if (home) home.garrisonCooldownUntil = s.tick + 90;
+    }
     for (const m of sq.members) {
       if (s.pawns.flags[m] & PawnFlag.Alive) {
         s.pawns.squadId[m] = 65535;
@@ -359,6 +393,27 @@ function promoteHero(s: SimState, winner: Squad, causeEventId: number): void {
   }
 }
 
+/** Arrival at the war objective opens a siege; the capture bar (P1.5) ticks
+ *  in the siege state and the war strip renders it. */
+function beginSiege(s: SimState, sq: Squad): void {
+  const w = s.wars.find(w2 => w2.id === sq.warId);
+  if (!w) { sq.state = 'disband'; return; }
+  if (sq.state !== 'siege') {
+    sq.state = 'siege';
+    if (w.captureProgress === undefined) w.captureProgress = 0;
+    const target = s.settlements[w.targetSettlement];
+    if (target) {
+      emitEvent(s, {
+        type: EventType.BattleFought,
+        factions: [sq.factionId, w.defender],
+        x: target.x, y: target.y,
+        causes: w.causeEventIds.slice(0, 1), severity: 3,
+        text: `Y${yearOf(s.tick)}: The host of ${s.factions[sq.factionId].name} lays siege to ${target.name}.`,
+      });
+    }
+  }
+}
+
 function resolveObjective(s: SimState, sq: Squad): void {
   const w = s.wars.find(w2 => w2.id === sq.warId);
   if (!w) { sq.state = 'disband'; return; }
@@ -393,6 +448,7 @@ function resolveObjective(s: SimState, sq: Squad): void {
     }
     case 'conquer': {
       target.factionId = w.attacker;
+      target.capturedTick = s.tick;                          // conquered folk remember (P1.2)
       // inhabitants flee to kin rather than change banners (04 §Refugees);
       // only with nowhere left to run do they remain as subjects
       const N2 = s.map.size;

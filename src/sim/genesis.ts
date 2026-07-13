@@ -52,6 +52,7 @@ export function genesis(seed: number, config: WorldConfig): SimState {
       buildings: [], farmPlots: [],
       founded: 0, razed: false,
       granaryCap: 4000, popCache: 0, moodAvg: 150, crowding: 0,
+      loyalty: 100, capturedTick: -1,
       foodPerCapitaAvg: 22000, foodFlowAvg: 0, lastFoodStock: 3100, lodStatistical: false,
       resourceTiles: { forage: [], hunt: [], fish: [], wood: [], mine: [], stone: [] },
       fertileLand: 40,

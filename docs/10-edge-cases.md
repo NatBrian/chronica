@@ -36,6 +36,13 @@ Single audit surface for edge cases across all systems. Each entry: trigger → 
 |---|---|---|---|
 | A1 | Tab backgrounded (rAF throttled, worker keeps running) | Deliberate default: sim continues at 1× (returning to progress is a feature); settings toggle for auto-pause | 01/07 |
 
+## Balance class (discovered facts, calibration baselines)
+
+| # | Trigger | Handling | Owner |
+|---|---|---|---|
+| B1 | Seed 42, default config: dwarves (Baarforge) collapse ~Y155-180 in BOTH v1.0 and M8 code (succession failure or pop zero; verified by A/B run 2026-07-14) | M8 balance gate is "no worse than v1": no extinction before Y60, >= 3 races alive at 300y (test/m8-cycle.test.ts). Dwarf survivability is a deferred balance quest, not an M8 blocker | 12 |
+| B2 | Auto-garrison re-formed the tick its predecessor died, and stacked while one fought (pre-M8): sieges stalled forever, casualties snowballed | Garrison rally cooldown 90 ticks after a defense squad ends + in-fight garrisons count as present; sieges progress between defender waves (P1.5, test/m8-cycle.test.ts) | 04/12 |
+
 ## Registry rules
 
 - New edge case discovered → lands here first, then handling propagates to the owning doc.

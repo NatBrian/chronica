@@ -5,6 +5,7 @@ import { WorldConfig, defaultConfig, TICKS_PER_YEAR, JournalEntry, Journal, ACTI
 import { AGE_SCALE, PawnFlag, packSnapshot, snapshot, restore, unpackSnapshot, pairKey } from './sim/state';
 import { scoreOffers } from './sim/systems/utilityAISystem';
 import { detectChapters, detectEra, ChapterDraft, EraDraft } from './chronicle/detector';
+import { loyaltyBreakdown } from './sim/rules/loyalty';
 import { templateChapter, draftTitle } from './chronicle/templates';
 import { validateChapter, chapterKnownNames } from './chronicle/validator';
 
@@ -174,6 +175,23 @@ function post(msg: unknown, transfer?: Transferable[]): void {
   (self as unknown as Worker).postMessage(msg, transfer ?? []);
 }
 
+/** Settlement inspector payload (M8): the loyalty list is the score. */
+function settlementPayload(st: import('./sim/state').Settlement) {
+  const s = sim!.state;
+  return {
+    id: st.id, name: st.name, x: st.x, y: st.y,
+    factionId: st.factionId,
+    factionName: s.factions[st.factionId]?.name ?? '?',
+    pop: st.popCache,
+    food: st.stockpile[0] + st.stockpile[1] + st.stockpile[2],
+    wood: st.stockpile[3] ?? 0,
+    loyalty: st.loyalty,
+    loyaltyMods: loyaltyBreakdown(s, st),
+    capital: s.factions[st.factionId]?.capital === st.id,
+    foundedYear: Math.floor(st.founded / TICKS_PER_YEAR),
+  };
+}
+
 function mapPlanesMsg() {
   const m = sim!.state.map;
   // copies (keep sim's own planes); cheap at 512²
@@ -216,6 +234,8 @@ function snapshotMsg() {
     wars: s.wars.map(w => ({
       id: w.id, attacker: w.attacker, defender: w.defender,
       objective: w.objective, startTick: w.startTick,
+      captureProgress: w.captureProgress ?? 0,
+      targetSettlement: w.targetSettlement,
     })),
     pairs: (() => {
       const out: { a: number; b: number; diplo: number; grudge: number }[] = [];
@@ -229,6 +249,7 @@ function snapshotMsg() {
     })(),
     squads: s.squads.map(sq => ({
       x: sq.x, y: sq.y, factionId: sq.factionId, state: sq.state, n: sq.members.length,
+      morale: sq.morale, warId: sq.warId,
     })),
     caravans: s.caravans.map(c => ({ x: c.x, y: c.y, factionId: c.factionId, purpose: c.purpose })),
     monsters: s.monsters.map(m => ({ x: m.x, y: m.y, kind: m.kind })),
@@ -452,6 +473,17 @@ self.onmessage = (e: MessageEvent) => {
       if (!sim) break;
       const s = sim.state;
       const p = s.pawns;
+      // clicking a town center inspects the settlement (M8 loyalty view);
+      // pawns win outside the immediate core
+      const core = s.settlements.find(st => {
+        if (st.razed) return false;
+        const dx = st.x - msg.x, dy = st.y - msg.y;
+        return dx * dx + dy * dy <= 2.5 * 2.5;
+      });
+      if (core) {
+        post({ t: 'inspection', pawn: null, settlement: settlementPayload(core) });
+        break;
+      }
       let best = -1, bestD = 18;
       for (let i = 0; i < s.pawnCount; i++) {
         if (!(p.flags[i] & PawnFlag.Alive)) continue;
@@ -459,7 +491,21 @@ self.onmessage = (e: MessageEvent) => {
         const d = dx * dx + dy * dy;
         if (d < bestD) { bestD = d; best = i; }
       }
-      if (best < 0) { post({ t: 'inspection', pawn: null }); break; }
+      if (best < 0) {
+        // no pawn under the cursor: try a settlement (M8 loyalty inspector)
+        let stBest = -1, stD = 8 * 8;
+        for (const st of s.settlements) {
+          if (st.razed) continue;
+          const dx = st.x - msg.x, dy = st.y - msg.y;
+          const d = dx * dx + dy * dy;
+          if (d < stD) { stD = d; stBest = st.id; }
+        }
+        post({
+          t: 'inspection', pawn: null,
+          settlement: stBest >= 0 ? settlementPayload(s.settlements[stBest]) : undefined,
+        });
+        break;
+      }
       const i = best;
       const offers = scoreOffers(s, i)
         .sort((a, b) => b.score - a.score).slice(0, 5)
