@@ -8,6 +8,9 @@ An observer-only fantasy world simulation in the browser. One procedurally gener
 2. **The living chronicle** — an LLM historian clusters the causality DAG into chapters and writes the island's history book as it happens. Every fact is validated against the event log; prose that invents names or years is rejected. LLM-less mode gets honest template chapters.
 3. **The time machine** — the sim is strictly deterministic: `history = f(seed, decision journal)`. Scrub the timeline to any year, or click a chronicle paragraph to jump the camera to that year and place. Replays are bit-identical and make zero LLM calls.
 
+![council](docs/screenshots/council.png)
+![chronicle](docs/screenshots/chronicle.png)
+
 ## Run
 
 ```bash

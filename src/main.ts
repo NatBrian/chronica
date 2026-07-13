@@ -9,7 +9,7 @@ import { TICKS_PER_YEAR, Journal, DecisionRequest, DecisionResult, JournalEntry 
 import { SaveStore, IdbBackend, SaveRecord } from './shared/saveStore';
 import { Brain } from './brain/brain';
 import { OllamaBrain } from './brain/ollamaBrain';
-import { ByoKeyBrain, loadByoConfig } from './brain/byoKeyBrain';
+import { ByoKeyBrain, loadByoConfig, saveByoConfig } from './brain/byoKeyBrain';
 import { BrainQueue } from './brain/queue';
 
 const atlas: PawnAtlas = bakePawnAtlas();
@@ -51,7 +51,23 @@ function bootApp(): void {
   fetch('http://localhost:11434/api/tags', { signal: AbortSignal.timeout(1500) })
     .then(r => r.json())
     .then(() => { llmStatus.textContent = '✓ Local LLM found — kings will think.'; })
-    .catch(() => { llmStatus.textContent = 'No local LLM — kings will rule by instinct. (ollama + OLLAMA_ORIGINS=* enables thinking kings)'; });
+    .catch(() => {
+      const hasKey = !!loadByoConfig();
+      llmStatus.innerHTML = hasKey
+        ? '✓ API key set — kings will think (BYO key).'
+        : 'No local LLM — kings will rule by instinct. (ollama + OLLAMA_ORIGINS=* enables thinking kings, or <a href="#" id="byok-link" style="color:#639bff">use an API key</a>)';
+      document.getElementById('byok-link')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        const provider = (prompt('Provider: "openrouter" or "anthropic"?', 'openrouter') ?? '').trim() as 'openrouter' | 'anthropic';
+        if (provider !== 'openrouter' && provider !== 'anthropic') return;
+        const apiKey = (prompt('API key (stored in your browser only):') ?? '').trim();
+        if (!apiKey) return;
+        const model = (prompt('Model id:', provider === 'anthropic' ? 'claude-haiku-4-5-20251001' : 'meta-llama/llama-3.3-70b-instruct') ?? '').trim();
+        if (!model) return;
+        saveByoConfig({ provider, apiKey, model });
+        llmStatus.textContent = '✓ API key saved — kings will think (BYO key).';
+      });
+    });
 
   document.getElementById('btn-random')!.addEventListener('click', () => {
     seedInput.value = String((Math.random() * 2 ** 31) | 0);

@@ -52,3 +52,13 @@ Survey of open-source world-sim / LLM-agent projects 2024–2026, to position Ch
 ## Conclusion
 
 Idea is *au courant*, not old: category (deterministic sim + local-LLM story layer) emerged 2025–26 and is still prototype-grade everywhere. Our 3 pillars survive contact with the field intact; pillar-combination (deciding-LLM + replay + clickable chronicle) remains unclaimed. Proceed per 08 roadmap, no design changes required. Re-survey at M4.
+
+---
+
+## Survey update — 2026-07-13 (M4 exit re-check)
+
+- **AEON Living Worlds** (github.com/Linutesto/aeon-living-worlds): evolved since the last survey — now couples a "deterministic Tier-0 sim" with optional local-LLM "world-spirit" tiers that *interpret or nudge* outcomes; thousands of citizens with memories/beliefs; real-time 3D dashboard; targets a single RTX 4090; still an explicit experimental prototype.
+- **Differentiation holds:** Chronica's thesis remains unclaimed — (1) LLM decisions that *are* history (journaled inputs, bit-identical replay, zero LLM calls on replay — AEON's LLM nudges, ours RULES and replays); (2) chronicle paragraphs as time-machine anchors (click prose → travel); (3) budget floor: full product on any laptop, LLM-less first-class, 84 KB gzipped static bundle vs 4090-class 3D client.
+- No new entrant found combining deciding-LLM + deterministic replay + chronicle-anchored time travel.
+
+Sources: [aeon-living-worlds](https://github.com/Linutesto/aeon-living-worlds), [Paracosm](https://paracosm.agentos.sh/), [SimWorld](https://github.com/SimWorld-AI/SimWorld)
