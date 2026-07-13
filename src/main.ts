@@ -9,6 +9,7 @@ import { bakeMapIcons } from './render/mapIcons';
 import { MapMode } from './render/mapMode';
 import { FACTION_HEX } from './render/palette';
 import { eventMeta, CATEGORY_LIST, CATEGORY_COLOR, EventCategory, eraColor } from './ui/eventMeta';
+import { Beacons } from './ui/beacons';
 import { TICKS_PER_YEAR, Journal, DecisionRequest, DecisionResult, JournalEntry } from './shared/types';
 import { SaveStore, IdbBackend, SaveRecord } from './shared/saveStore';
 import { Brain } from './brain/brain';
@@ -115,6 +116,8 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
   const renderer = new Renderer(canvas, 512);
   const mapIcons = bakeMapIcons();
   let mapMode: MapMode | null = null;
+  const beacons = new Beacons();
+  let flyTarget: { x: number; y: number } | null = null;
   const worker = new Worker(new URL('./simWorker.ts', import.meta.url), { type: 'module' });
   const hudYear = document.getElementById('hud-year')!;
   const hudPop = document.getElementById('hud-pop')!;
@@ -365,13 +368,26 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
   let dragging = false; let lastX = 0; let lastY = 0; let downX = 0; let downY = 0;
   canvas.addEventListener('mousedown', (e) => {
     dragging = true; lastX = downX = e.clientX; lastY = downY = e.clientY;
+    flyTarget = null;                       // manual camera cancels auto-pan
     canvas.classList.add('dragging');
   });
   window.addEventListener('mouseup', (e) => {
     if (dragging && Math.abs(e.clientX - downX) < 4 && Math.abs(e.clientY - downY) < 4) {
       const rect = canvas.getBoundingClientRect();
-      const [wx, wy] = renderer.camera.screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
-      worker.postMessage({ t: 'inspect', x: Math.round(wx), y: Math.round(wy) });
+      const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
+      // beacon pins and edge arrows take the click before pawn inspection (H)
+      const hit = beacons.hitTest(sx, sy, renderer.camera);
+      if (hit) {
+        if (hit.ev) {
+          flyTarget = { x: hit.ev.x, y: hit.ev.y };
+          worker.postMessage({ t: 'chain', eventId: hit.ev.id });
+        } else {
+          openRail('events');
+        }
+      } else {
+        const [wx, wy] = renderer.camera.screenToWorld(sx, sy);
+        worker.postMessage({ t: 'inspect', x: Math.round(wx), y: Math.round(wy) });
+      }
     }
     dragging = false; canvas.classList.remove('dragging');
   });
@@ -615,6 +631,15 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
       showCouncil(msg);
     }
   }
+
+  // tier-1 event beacons also toast (G3/H tier map, one source of truth)
+  beacons.onTier1Live = (ev) => {
+    const meta = eventMeta(ev.type);
+    toast(`${meta.glyph} ${ev.text.replace(/^Y\d+: /, '')}`, 'click to look', meta.cat === 'war', () => {
+      flyTarget = { x: ev.x, y: ev.y };
+      worker.postMessage({ t: 'chain', eventId: ev.id });
+    });
+  };
 
   function toast(title: string, sub: string, war: boolean, onClick: () => void): void {
     const el = document.createElement('div');
@@ -1251,6 +1276,15 @@ ${parts.join('\n')}</body>`;
       mctx.fillStyle = '#d95763';
       mctx.fillRect(sq.x * k - 2, sq.y * k - 2, 4, 4);
     }
+    // beacon echo pings (H3): same event, same color, pulsing
+    const pulse = 2 + 1.6 * (0.5 + 0.5 * Math.sin(performance.now() / 280));
+    for (const p of beacons.pings()) {
+      mctx.strokeStyle = p.color;
+      mctx.lineWidth = 1.5;
+      mctx.beginPath();
+      mctx.arc(p.x * k, p.y * k, pulse, 0, 7);
+      mctx.stroke();
+    }
     // camera rect
     const cam = renderer.camera;
     const w = cam.viewW / cam.pxPerTile * k, h = cam.viewH / cam.pxPerTile * k;
@@ -1315,10 +1349,23 @@ ${parts.join('\n')}</body>`;
   let lastT = performance.now();
   function frame(now: number): void {
     const dt = now - lastT; lastT = now;
+    // eased camera pan toward a clicked beacon/arrow (H2: no hard teleports)
+    if (flyTarget) {
+      const cam = renderer.camera;
+      const k = 1 - Math.pow(0.002, dt / 600);
+      cam.cx += (flyTarget.x - cam.cx) * k;
+      cam.cy += (flyTarget.y - cam.cy) * k;
+      if (Math.abs(flyTarget.x - cam.cx) < 0.8 && Math.abs(flyTarget.y - cam.cy) < 0.8) flyTarget = null;
+    }
     renderer.camera.update(dt);
     renderer.drawTerrain();
     drawOverlay();
     drawDynamic();
+    if (latest) {
+      beacons.update(majors, latest.tick, now, latest.inPast);
+      beacons.draw(renderer.ctx, renderer.camera, now);
+      beacons.drawArrows(renderer.ctx, renderer.camera, now);
+    }
     drawTimeline();
     drawMinimap();
     if (latest) {
@@ -1446,9 +1493,10 @@ ${parts.join('\n')}</body>`;
 
   // test/debug handle (used by Playwright checks)
   (window as any).__chronica = {
-    renderer, worker,
+    renderer, worker, beacons,
     getLatest: () => latest,
     getMajors: () => majors,
+    openRail,
     goto: (x: number, y: number, level?: number) => {
       renderer.camera.cx = x; renderer.camera.cy = y;
       if (level !== undefined) renderer.camera.level = level as 0 | 1 | 2 | 3;
