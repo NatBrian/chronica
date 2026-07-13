@@ -38,6 +38,7 @@ export interface Pawns {
   namedId: Int16Array;        // -1 = not named
   flags: Uint16Array;
   jobAffinity: Uint8Array;    // last sustained action id (job momentum)
+  movePts: Uint8Array;        // movement point accumulator (terrain cost)
 }
 
 export const AGE_SCALE = 4;  // age stored in ticks/4; 65535*4 ticks ≈ 728y headroom
@@ -57,6 +58,7 @@ export function allocPawns(max: number): Pawns {
     temper: new Uint8Array(max), longevity: new Uint8Array(max), charisma: new Uint8Array(max),
     squadId: new Uint16Array(max).fill(65535), namedId: new Int16Array(max).fill(-1),
     flags: new Uint16Array(max), jobAffinity: new Uint8Array(max),
+    movePts: new Uint8Array(max),
   };
 }
 
@@ -81,6 +83,8 @@ export interface Settlement {
   crowding: number;           // 0..255 soft pressure
   foodPerCapitaAvg: number;   // rolling average ×1000 (fixed point)
   lodStatistical: boolean;
+  /** cached advertised resource tiles, refreshed periodically (03 smart-world) */
+  resourceTiles: { forage: number[]; hunt: number[]; fish: number[]; wood: number[]; mine: number[] };
 }
 
 export interface LedgerEntry { tick: number; delta: number; why: string }
@@ -267,6 +271,7 @@ function pawnBuffers(p: Pawns): ArrayBufferView[] {
     p.age, p.factionId, p.settlementId, p.action, p.actionTarget, p.actionTicks,
     p.pregTicks, p.pairId, p.motherId, p.fatherId, p.strength, p.fertility,
     p.temper, p.longevity, p.charisma, p.squadId, p.namedId, p.flags, p.jobAffinity,
+    p.movePts,
   ];
 }
 

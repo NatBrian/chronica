@@ -23,6 +23,15 @@
       padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border);
       font-variant-numeric: tabular-nums; pointer-events: none; }
     #hud .era { color: var(--dim); font-size: 12px; }
+    #inspector { position: absolute; top: 10px; right: 10px; width: 260px;
+      background: #14141fee; border: 1px solid var(--border); border-radius: 8px;
+      padding: 12px; font-size: 13px; max-height: 80%; overflow-y: auto; }
+    #inspector h4 { font-weight: 500; margin-bottom: 8px; }
+    #inspector .bar { height: 6px; background: #23233a; border-radius: 3px; margin: 2px 0 6px; }
+    #inspector .bar > div { height: 100%; border-radius: 3px; background: var(--accent); }
+    #inspector .lbl { color: var(--dim); font-size: 11px; display: flex; justify-content: space-between; }
+    #inspector .offer { display: flex; justify-content: space-between; color: var(--dim); font-size: 12px; }
+    #inspector .close { float: right; cursor: pointer; color: var(--dim); }
     #chronicle-rail { grid-area: chronicle; width: 0; background: var(--panel);
       border-left: 1px solid var(--border); overflow-y: auto; transition: width .2s; }
     #chronicle-rail.open { width: 340px; }
@@ -70,6 +79,7 @@
     <div id="world-wrap">
       <canvas id="world"></canvas>
       <div id="hud"><span id="hud-year">Year 0</span> · <span id="hud-pop">—</span><div class="era" id="hud-island"></div></div>
+      <div id="inspector" style="display:none"></div>
     </div>
     <div id="chronicle-rail"></div>
     <div id="event-feed"></div>

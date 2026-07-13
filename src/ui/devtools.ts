@@ -4,6 +4,7 @@ import { generateWorld } from '../sim/world/worldgen';
 import { defaultConfig } from '../shared/types';
 import { tileColor, RenderMapData } from '../render/terrain';
 import { WorldMap } from '../sim/world/map';
+import { bakePawnAtlas, JOBS, SPRITE_W, SPRITE_H } from '../render/sprites';
 
 function asRenderMap(m: WorldMap): RenderMapData {
   return m as unknown as RenderMapData;
@@ -83,6 +84,77 @@ export function mountSeedBrowser(): void {
     setTimeout(next, 0);
   }
   next();
+}
+
+/** Sprite preview (06 §Closed visual loop): all templates at 1×/2×/4× on
+ * terrain, plus blacked-out silhouette row for the race-silhouette gate. */
+export function mountSpritePreview(): void {
+  const root = shell('Chronica — Sprite Preview & Quality Gates');
+  const atlas = bakePawnAtlas();
+  const scales = [1, 2, 4, 8];
+  const raceNames = ['human', 'elf', 'dwarf', 'orc'];
+
+  // terrain backdrop strip from a real seed
+  const world = generateWorld(42, { ...defaultConfig(), mapSize: 128 });
+
+  for (let race = 0; race < 4; race++) {
+    const h = document.createElement('h3');
+    h.textContent = raceNames[race];
+    h.style.cssText = 'margin:14px 0 6px;color:#9badb7;font-weight:400';
+    root.appendChild(h);
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap';
+    root.appendChild(row);
+    for (const scale of scales) {
+      const c = document.createElement('canvas');
+      const cols = 4 * JOBS.length * 3;
+      c.width = cols * (SPRITE_W + 2) * scale;
+      c.height = (SPRITE_H + 8) * scale;
+      c.style.cssText = 'image-rendering:pixelated;border:1px solid #34345230';
+      const ctx = c.getContext('2d')!;
+      ctx.imageSmoothingEnabled = false;
+      // terrain backdrop
+      const rm = world.map as unknown as RenderMapData;
+      for (let tx = 0; tx * 16 < c.width; tx++) {
+        const ti = (64 + (tx % 8)) * 128 + 40 + (tx % 12);
+        const [r, g, b] = tileColor(rm, ti, tx, 0);
+        ctx.fillStyle = `rgb(${r},${g},${b})`;
+        ctx.fillRect(tx * 16, 0, 16, c.height);
+      }
+      let col = 0;
+      for (let faction = 0; faction < 4; faction++) {
+        for (const job of JOBS) {
+          for (let v = 0; v < 3; v++) {
+            const { x, y } = atlas.index[`${race}:${faction}:${job}:${v}`];
+            ctx.drawImage(atlas.canvas as CanvasImageSource, x, y, SPRITE_W, SPRITE_H,
+              col * (SPRITE_W + 2) * scale, 4 * scale, SPRITE_W * scale, SPRITE_H * scale);
+            col++;
+          }
+        }
+      }
+      row.appendChild(c);
+    }
+  }
+
+  // silhouette gate: blacked shapes side by side
+  const h = document.createElement('h3');
+  h.textContent = 'silhouette gate (races must be distinguishable as solid shapes)';
+  h.style.cssText = 'margin:18px 0 6px;color:#9badb7;font-weight:400';
+  root.appendChild(h);
+  const c = document.createElement('canvas');
+  c.width = 4 * (SPRITE_W + 4) * 8; c.height = SPRITE_H * 8;
+  c.style.cssText = 'image-rendering:pixelated;background:#cbdbfc';
+  const ctx = c.getContext('2d')!;
+  ctx.imageSmoothingEnabled = false;
+  for (let race = 0; race < 4; race++) {
+    const { x, y } = atlas.index[`${race}:0:none:0`];
+    ctx.drawImage(atlas.canvas as CanvasImageSource, x, y, SPRITE_W, SPRITE_H,
+      race * (SPRITE_W + 4) * 8, 0, SPRITE_W * 8, SPRITE_H * 8);
+  }
+  ctx.globalCompositeOperation = 'source-atop';
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, c.width, c.height);
+  root.appendChild(c);
 }
 
 export function mountLayerViewer(seed: number, size: number): void {

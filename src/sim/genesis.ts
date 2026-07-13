@@ -53,6 +53,7 @@ export function genesis(seed: number, config: WorldConfig): SimState {
       founded: 0, razed: false,
       granaryCap: 4000, popCache: 0, moodAvg: 150, crowding: 0,
       foodPerCapitaAvg: 1100, lodStatistical: false,
+      resourceTiles: { forage: [], hunt: [], fish: [], wood: [], mine: [] },
     };
     settlement.stockpile[Good.Grain] = 2600;
     settlement.stockpile[Good.Meat] = 500;

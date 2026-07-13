@@ -1,8 +1,9 @@
 // Sim Web Worker — hosts the deterministic Sim; render thread gets snapshots
 // via transferable buffers (01). This file is NOT /src/sim (it may use timers).
 import { Sim } from './sim/engine';
-import { WorldConfig, defaultConfig, TICKS_PER_YEAR, JournalEntry, Journal } from './shared/types';
-import { PawnFlag } from './sim/state';
+import { WorldConfig, defaultConfig, TICKS_PER_YEAR, JournalEntry, Journal, ACTION_NAMES } from './shared/types';
+import { AGE_SCALE, PawnFlag } from './sim/state';
+import { scoreOffers } from './sim/systems/utilityAISystem';
 
 let sim: Sim | null = null;
 let ticksPerSec = 0;           // 0 = paused
@@ -120,6 +121,49 @@ self.onmessage = (e: MessageEvent) => {
     }
     case 'exportJournal': {
       post({ t: 'journal', journal: sim?.journal ?? null });
+      break;
+    }
+    case 'inspect': {
+      if (!sim) break;
+      const s = sim.state;
+      const p = s.pawns;
+      let best = -1, bestD = 18;
+      for (let i = 0; i < s.pawnCount; i++) {
+        if (!(p.flags[i] & PawnFlag.Alive)) continue;
+        const dx = p.x[i] - msg.x, dy = p.y[i] - msg.y;
+        const d = dx * dx + dy * dy;
+        if (d < bestD) { bestD = d; best = i; }
+      }
+      if (best < 0) { post({ t: 'inspection', pawn: null }); break; }
+      const i = best;
+      const offers = scoreOffers(s, i)
+        .sort((a, b) => b.score - a.score).slice(0, 5)
+        .map(o => ({ action: ACTION_NAMES[o.action], score: o.score }));
+      const named = p.namedId[i] >= 0 ? s.named[p.namedId[i]] : null;
+      post({
+        t: 'inspection',
+        pawn: {
+          idx: i,
+          x: p.x[i], y: p.y[i],
+          faction: s.factions[p.factionId[i]]?.name ?? '?',
+          race: s.factions[p.factionId[i]]?.race ?? 0,
+          ageYears: (p.age[i] * AGE_SCALE / TICKS_PER_YEAR) | 0,
+          female: !!(p.flags[i] & PawnFlag.Female),
+          child: !!(p.flags[i] & PawnFlag.Child),
+          needs: {
+            hunger: p.hunger[i], energy: p.energy[i], shelter: p.shelter[i],
+            safety: p.safety[i], social: p.social[i], mood: p.mood[i], hp: p.hp[i],
+          },
+          action: ACTION_NAMES[p.action[i]],
+          offers,
+          traits: {
+            strength: p.strength[i], fertility: p.fertility[i], temper: p.temper[i],
+            longevity: p.longevity[i], charisma: p.charisma[i],
+          },
+          paired: p.pairId[i] >= 0,
+          named: named ? { name: named.name, role: named.role, bio: named.bio, memories: named.memories.map(m => m.text) } : null,
+        },
+      });
       break;
     }
     case 'hash': {
