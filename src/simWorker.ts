@@ -524,6 +524,30 @@ self.onmessage = (e: MessageEvent) => {
       });
       break;
     }
+    case 'stats': {
+      // Stats tab + HUD chips (11 §I1/I2): the books the sim kept since Year 0
+      if (!sim) break;
+      const ys = sim.state.yearStats;
+      const nf = sim.state.factions.length;
+      const series = (pick: (row: typeof ys[number]) => number[]): number[][] => {
+        const out: number[][] = Array.from({ length: nf }, () => new Array(ys.length));
+        for (let i = 0; i < ys.length; i++) {
+          const row = pick(ys[i]);
+          for (let f = 0; f < nf; f++) out[f][i] = row?.[f] ?? 0;
+        }
+        return out;
+      };
+      post({
+        t: 'stats',
+        years: ys.map(r => r.year),
+        pop: series(r => r.popByFaction),
+        food: series(r => r.foodByFaction),
+        territory: series(r => r.territoryByFaction),
+        warTicks: ys.map(r => r.warTicks),
+        deathsByCause: sim.state.deathsByCause,
+      });
+      break;
+    }
     case 'councilLog': {
       // Councils tab (11 §G1): every applied decision, verbatim reasoning
       if (!sim) break;

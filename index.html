@@ -23,6 +23,17 @@
       padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border);
       font-variant-numeric: tabular-nums; pointer-events: none; }
     #hud .era { color: var(--dim); font-size: 12px; }
+    /* per-faction HUD chips (11 §I2): the island's pulse, always on */
+    #hud-factions { position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+      display: flex; gap: 6px; z-index: 10; }
+    .fhud { background: #14141fcc; border: 1px solid var(--border); border-radius: 6px;
+      padding: 3px 8px; font-size: 12px; cursor: pointer; display: flex; align-items: center;
+      gap: 5px; font-variant-numeric: tabular-nums; }
+    .fhud:hover { border-color: var(--accent); }
+    .fhud .sw { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
+    .fhud .up { color: #6abe30; } .fhud .down { color: #d95763; }
+    .fhud canvas { display: block; }
+    body.postcard #hud-factions { display: none !important; }
     #inspector { position: absolute; top: 10px; right: 10px; width: 260px;
       background: #14141fee; border: 1px solid var(--border); border-radius: 8px;
       padding: 12px; font-size: 13px; max-height: 80%; overflow-y: auto; }
@@ -224,6 +235,7 @@
     <div id="world-wrap">
       <canvas id="world"></canvas>
       <div id="hud"><span id="hud-year">Year 0</span> · <span id="hud-pop">-</span><div class="era" id="hud-island"></div></div>
+      <div id="hud-factions"></div>
       <div id="inspector" style="display:none"></div>
       <div id="seek-status"></div>
       <div id="postcard-caption"></div>

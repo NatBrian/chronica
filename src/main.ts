@@ -10,6 +10,7 @@ import { MapMode } from './render/mapMode';
 import { FACTION_HEX } from './render/palette';
 import { eventMeta, CATEGORY_LIST, CATEGORY_COLOR, EventCategory, eraColor } from './ui/eventMeta';
 import { Beacons } from './ui/beacons';
+import { StatsPanel, StatsData } from './ui/statsCharts';
 import { TICKS_PER_YEAR, Journal, DecisionRequest, DecisionResult, JournalEntry } from './shared/types';
 import { SaveStore, IdbBackend, SaveRecord } from './shared/saveStore';
 import { Brain } from './brain/brain';
@@ -236,6 +237,11 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
       case 'allEvents':
         allEvents = msg.events;
         renderEvents();
+        break;
+      case 'stats':
+        statsData = msg;
+        statsPanel?.setData(msg);
+        renderHudChips();
         break;
       case 'councilLog':
         councilEntries = msg.entries;
@@ -727,6 +733,9 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
     } else if (tab === 'councils') {
       worker.postMessage({ t: 'councilLog' });
       clUnread = 0; updateBadges();
+    } else if (tab === 'stats') {
+      ensureStatsPanel();
+      worker.postMessage({ t: 'stats' });
     }
     updateReadingMode();
   }
@@ -838,6 +847,60 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
         (en.reasoning ? `<div class="rs">“${en.reasoning}”</div>` : '') +
         `<div class="hd"><span class="${llm ? 'src-llm' : ''}">${llm ? 'spoken by the king' : 'ruled by instinct'}</span></div>`;
       clList.appendChild(row);
+    }
+  }
+
+  // ---- stats tab + HUD faction chips (11 §I1/I2) ----
+  let statsData: StatsData | null = null;
+  let statsPanel: StatsPanel | null = null;
+  let lastStatsPoll = 0;
+  const hudFactions = document.getElementById('hud-factions')!;
+
+  function ensureStatsPanel(): void {
+    if (statsPanel) return;
+    statsPanel = new StatsPanel(document.getElementById('tab-stats')!, {
+      factionName: (f) => latest?.factions?.[f]?.name.split(' ')[0] ?? `#${f}`,
+      eras: () => chronState.eras,
+      onSeek: (year) => doSeek(year),
+    });
+    if (statsData) statsPanel.setData(statsData);
+  }
+
+  function renderHudChips(): void {
+    if (!statsData || !latest?.factions) return;
+    const n = statsData.years.length;
+    if (n === 0) return;
+    hudFactions.innerHTML = '';
+    const atWar = new Set<number>();
+    for (const w of latest.wars ?? []) { atWar.add(w.attacker); atWar.add(w.defender); }
+    for (const f of latest.factions) {
+      if (f.extinct) continue;
+      const pop = statsData.pop[f.id]?.[n - 1] ?? 0;
+      const popPrev = statsData.pop[f.id]?.[Math.max(0, n - 11)] ?? pop;
+      const chip = document.createElement('div');
+      chip.className = 'fhud';
+      chip.title = `${f.name} · click for charts`;
+      const trend = pop > popPrev ? '<span class="up">▲</span>' : pop < popPrev ? '<span class="down">▼</span>' : '';
+      chip.innerHTML = `<span class="sw" style="background:${FACTION_COLORS[f.id]}"></span>` +
+        `<span>${f.name.split(' ')[0]}</span><b>${pop}</b>${trend}` +
+        `${atWar.has(f.id) ? '⚔' : ''}${pop > 0 && pop < 50 ? '💀' : ''}`;
+      // 50y pop sparkline
+      const spark = document.createElement('canvas');
+      spark.width = 44; spark.height = 14;
+      const sctx = spark.getContext('2d')!;
+      const win = statsData.pop[f.id]?.slice(-50) ?? [];
+      const maxV = Math.max(1, ...win);
+      sctx.strokeStyle = FACTION_COLORS[f.id] ?? '#fff';
+      sctx.beginPath();
+      win.forEach((v, i) => {
+        const x = (i / Math.max(1, win.length - 1)) * 43;
+        const y = 13 - (v / maxV) * 12;
+        if (i === 0) sctx.moveTo(x, y); else sctx.lineTo(x, y);
+      });
+      sctx.stroke();
+      chip.appendChild(spark);
+      chip.addEventListener('click', () => openRail('stats'));
+      hudFactions.appendChild(chip);
     }
   }
 
@@ -1376,6 +1439,10 @@ ${parts.join('\n')}</body>`;
     if (now - lastFeedPoll > 900) {
       lastFeedPoll = now;
       worker.postMessage({ t: 'recentFeed', minSeverity: 2 });
+    }
+    if (now - lastStatsPoll > 5000) {
+      lastStatsPoll = now;
+      worker.postMessage({ t: 'stats' });
     }
     requestAnimationFrame(frame);
   }
