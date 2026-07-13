@@ -159,6 +159,13 @@
       display: none; align-items: center; justify-content: center; font-size: 18px; color: var(--dim); }
     #overlay-bar { position: absolute; bottom: 160px; left: 10px; display: flex; gap: 4px; }
     #overlay-bar .ov.active { background: var(--accent); }
+    #overlay-legend { position: absolute; bottom: 196px; left: 10px; background: #14141fe0;
+      border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; font-size: 12px;
+      line-height: 1.7; display: none; max-width: 260px; z-index: 12; }
+    #ov-tip { position: fixed; background: #1c1c2bf5; border: 1px solid var(--border);
+      border-radius: 6px; padding: 6px 10px; font-size: 12px; pointer-events: none;
+      display: none; z-index: 26; }
+    body.postcard #overlay-legend { display: none !important; }
     #minimap { position: absolute; bottom: 12px; left: 10px; border: 1px solid var(--border);
       border-radius: 6px; image-rendering: pixelated; cursor: pointer; background: #14141f; }
     #hint { position: absolute; top: 100px; left: 50%; transform: translateX(-50%);
@@ -246,6 +253,8 @@
         <button class="ctl ov" data-ov="food" title="food scarcity (F)">🌾</button>
         <button class="ctl ov" data-ov="war" title="war fronts (Shift+W)">⚔</button>
       </div>
+      <div id="overlay-legend"></div>
+      <div id="ov-tip"></div>
       <canvas id="minimap" width="140" height="140"></canvas>
       <div id="hint" style="display:none"></div>
       <div id="council-panel" style="display:none"></div>

@@ -93,6 +93,98 @@ export class MapMode {
     }
   }
 
+  /** War overlay v2 (11 §C5): overlays show state, not just live actors.
+   *  Territory context in dim faction strokes, at-war borders pulse red,
+   *  banner-vs-banner chips at each front, scorch marks at recent battles. */
+  drawWarOverlay(
+    ctx: CanvasRenderingContext2D, cam: Camera,
+    snap: {
+      settlements: MapModeSettlement[]; factions: MapModeFaction[];
+      wars: MapModeWar[]; battles: { x: number; y: number; age01: number }[];
+    },
+    now: number,
+  ): void {
+    this.refresh(snap.settlements);
+    const [ox, oy] = cam.worldToScreen(0, 0);
+    const B = BLOCK_TILES * cam.pxPerTile;
+    const atWar = new Set<number>();
+    for (const w of snap.wars) {
+      atWar.add(Math.min(w.attacker, w.defender) * 16 + Math.max(w.attacker, w.defender));
+    }
+    const pulse = 0.55 + 0.45 * Math.sin(now / 260);
+    // per-war-pair midpoint accumulator for banner-vs-banner chips
+    const mids = new Map<number, { sx: number; sy: number; n: number; a: number; b: number }>();
+    for (const seg of this.borders) {
+      const sx = ox + seg.bx * B, sy = oy + seg.by * B;
+      const ex = seg.dir === 0 ? sx + B : sx, ey = seg.dir === 0 ? sy : sy + B;
+      const key = seg.a >= 0 && seg.b >= 0
+        ? Math.min(seg.a, seg.b) * 16 + Math.max(seg.a, seg.b) : -1;
+      if (key >= 0 && atWar.has(key)) {
+        ctx.globalAlpha = pulse;
+        ctx.fillStyle = '#d95763';
+        if (seg.dir === 0) ctx.fillRect(Math.round(ex) - 2, Math.round(sy), 4, Math.ceil(B));
+        else ctx.fillRect(Math.round(sx), Math.round(ey) - 2, Math.ceil(B), 4);
+        ctx.globalAlpha = 1;
+        const m = mids.get(key) ?? { sx: 0, sy: 0, n: 0, a: Math.min(seg.a, seg.b), b: Math.max(seg.a, seg.b) };
+        m.sx += ex; m.sy += ey; m.n++;
+        mids.set(key, m);
+      } else {
+        // peacetime borders stay visible but quiet: state, not noise
+        ctx.globalAlpha = 0.35;
+        if (seg.dir === 0) {
+          if (seg.a >= 0) { ctx.fillStyle = FACTION_HEX[seg.a]; ctx.fillRect(Math.round(ex) - 1, Math.round(sy), 1, Math.ceil(B)); }
+          if (seg.b >= 0) { ctx.fillStyle = FACTION_HEX[seg.b]; ctx.fillRect(Math.round(ex), Math.round(sy), 1, Math.ceil(B)); }
+        } else {
+          if (seg.a >= 0) { ctx.fillStyle = FACTION_HEX[seg.a]; ctx.fillRect(Math.round(sx), Math.round(ey) - 1, Math.ceil(B), 1); }
+          if (seg.b >= 0) { ctx.fillStyle = FACTION_HEX[seg.b]; ctx.fillRect(Math.round(sx), Math.round(ey), Math.ceil(B), 1); }
+        }
+        ctx.globalAlpha = 1;
+      }
+    }
+    // banner-vs-banner chip at each front's center of mass
+    for (const m of mids.values()) {
+      const cx = m.sx / m.n, cy = m.sy / m.n;
+      ctx.fillStyle = '#14141fd8';
+      ctx.fillRect(Math.round(cx) - 16, Math.round(cy) - 9, 32, 18);
+      ctx.fillStyle = FACTION_HEX[m.a] ?? '#fff';
+      ctx.fillRect(Math.round(cx) - 12, Math.round(cy) - 5, 9, 6);
+      ctx.fillStyle = FACTION_HEX[m.b] ?? '#fff';
+      ctx.fillRect(Math.round(cx) + 3, Math.round(cy) - 5, 9, 6);
+      ctx.fillStyle = '#cbdbfc';
+      ctx.font = '9px system-ui';
+      ctx.fillText('⚔', Math.round(cx) - 3, Math.round(cy) + 3);
+    }
+    // scorch marks at recent battle sites, fading with age (C5 layer b)
+    for (const bt of snap.battles) {
+      const [sx, sy] = cam.worldToScreen(bt.x + 0.5, bt.y + 0.5);
+      if (sx < -20 || sy < -20 || sx > cam.viewW + 20 || sy > cam.viewH + 20) continue;
+      ctx.globalAlpha = (1 - bt.age01) * 0.8;
+      ctx.strokeStyle = '#8f563b';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(sx - 5, sy - 5); ctx.lineTo(sx + 5, sy + 5);
+      ctx.moveTo(sx + 5, sy - 5); ctx.lineTo(sx - 5, sy + 5);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  /** Nearest territory border under the cursor, for grudge hover (C5). */
+  borderAt(sx: number, sy: number, cam: Camera, rPx: number): { a: number; b: number } | null {
+    const [ox, oy] = cam.worldToScreen(0, 0);
+    const B = BLOCK_TILES * cam.pxPerTile;
+    let best: { a: number; b: number } | null = null;
+    let bestD = rPx * rPx;
+    for (const seg of this.borders) {
+      if (seg.a < 0 || seg.b < 0) continue;
+      const ex = ox + (seg.dir === 0 ? (seg.bx + 1) * B : seg.bx * B + B / 2);
+      const ey = oy + (seg.dir === 0 ? seg.by * B + B / 2 : (seg.by + 1) * B);
+      const d = (sx - ex) * (sx - ex) + (sy - ey) * (sy - ey);
+      if (d < bestD) { bestD = d; best = { a: seg.a, b: seg.b }; }
+    }
+    return best;
+  }
+
   draw(
     ctx: CanvasRenderingContext2D, cam: Camera, icons: MapIconAtlas,
     snap: {

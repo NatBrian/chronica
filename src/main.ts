@@ -42,6 +42,7 @@ interface WorkerSnapshot {
   settlements: { id: number; x: number; y: number; name: string; factionId: number; razed: boolean; pop: number; stockpile: number[]; buildings: { kind: number; x: number; y: number; stage: number }[] }[];
   factions?: { id: number; race: number; name: string; extinct?: boolean; capital?: number }[];
   wars?: { id: number; attacker: number; defender: number; objective: string; startTick: number }[];
+  pairs?: { a: number; b: number; diplo: number; grudge: number }[];
   squads?: { x: number; y: number; factionId: number; state: string; n: number }[];
   caravans?: { x: number; y: number; factionId: number; purpose: string }[];
   monsters?: { x: number; y: number; kind: string }[];
@@ -1215,7 +1216,60 @@ ${parts.join('\n')}</body>`;
     document.querySelectorAll<HTMLElement>('.ov').forEach(b => {
       b.classList.toggle('active', b.dataset.ov === overlayMode);
     });
+    updateOverlayLegend();
   }
+
+  // legend chip (C5): an active overlay always announces itself
+  const overlayLegend = document.getElementById('overlay-legend')!;
+  const ovTip = document.getElementById('ov-tip')!;
+  let legendWarCount = -1;
+  function updateOverlayLegend(): void {
+    if (overlayMode === '') { overlayLegend.style.display = 'none'; return; }
+    overlayLegend.style.display = 'block';
+    const rows: string[] = [];
+    const head = (name: string) => `<b style="letter-spacing:1px;font-size:10px;color:#9badb7">${name.toUpperCase()} OVERLAY</b>`;
+    if (overlayMode === 'territory') {
+      rows.push(head('territory'));
+      for (const f of latest?.factions ?? []) {
+        if (!f.extinct) rows.push(`<span style="color:${FACTION_COLORS[f.id]}">■</span> ${f.name}`);
+      }
+      if (rows.length === 1) rows.push('nothing to show right now');
+    } else if (overlayMode === 'pop') {
+      rows.push(head('population'), '<span style="color:#d9a066">■</span> each dot: people');
+    } else if (overlayMode === 'food') {
+      rows.push(head('food'), '<span style="color:#6abe30">●</span> fed settlement', '<span style="color:#d95763">●</span> hungry settlement');
+    } else if (overlayMode === 'war') {
+      rows.push(head('war'));
+      const wars = latest?.wars ?? [];
+      if (wars.length === 0) {
+        rows.push('🕊 the island is at peace');
+      } else {
+        for (const w of wars) {
+          const an = latest?.factions?.[w.attacker]?.name ?? '?';
+          const dn = latest?.factions?.[w.defender]?.name ?? '?';
+          rows.push(`<span style="color:#d95763">⚔</span> ${an} vs ${dn} · ${w.objective}`);
+        }
+      }
+      rows.push('<span style="color:#8f563b">✕</span> recent battle site', '<span style="color:#9badb7">hover a border for grudges</span>');
+    }
+    overlayLegend.innerHTML = rows.join('<br>');
+  }
+
+  const DIPLO_NAMES = ['at war', 'hostile', 'neutral', 'trading', 'allied', 'vassal'];
+  canvas.addEventListener('mousemove', (e) => {
+    if (overlayMode !== 'war' || !mapMode || dragging) { ovTip.style.display = 'none'; return; }
+    const rect = canvas.getBoundingClientRect();
+    const hit = mapMode.borderAt(e.clientX - rect.left, e.clientY - rect.top, renderer.camera, 14);
+    if (!hit) { ovTip.style.display = 'none'; return; }
+    const pair = latest?.pairs?.find(p => p.a === hit.a && p.b === hit.b);
+    if (!pair) { ovTip.style.display = 'none'; return; }
+    const an = latest?.factions?.[pair.a]?.name ?? '?';
+    const bn = latest?.factions?.[pair.b]?.name ?? '?';
+    ovTip.innerHTML = `<b>${an}</b> · <b>${bn}</b><br>${DIPLO_NAMES[pair.diplo] ?? '?'} · grudge ${pair.grudge}`;
+    ovTip.style.left = `${e.clientX + 14}px`;
+    ovTip.style.top = `${e.clientY + 10}px`;
+    ovTip.style.display = 'block';
+  });
   document.querySelectorAll<HTMLElement>('.ov').forEach(b => {
     b.addEventListener('click', () => setOverlay(b.dataset.ov as typeof overlayMode));
   });
@@ -1278,8 +1332,28 @@ ${parts.join('\n')}</body>`;
     if (overlayMode === '' || !renderer.terrain) return;
     const ctx = renderer.ctx;
     const cam = renderer.camera;
+    // an active overlay always shows something (C5): unmistakable mode tint
+    ctx.fillStyle = '#0b0b1226';
+    ctx.fillRect(0, 0, cam.viewW, cam.viewH);
     if (overlayMode === 'war') {
-      // war fronts: crossed-swords at fighting squads, arrows on marchers
+      // war overlay v2 (C5): state layers first, live actors on top
+      if (mapMode && latest) {
+        const nowMs = performance.now();
+        const battles: { x: number; y: number; age01: number }[] = [];
+        const HORIZON = 5 * TICKS_PER_YEAR;
+        for (const ev of majors) {
+          if (ev.type !== 2 && ev.type !== 3) continue;      // BattleFought, SettlementRazed
+          const age = latest.tick - ev.tick;
+          if (age < 0 || age > HORIZON) continue;
+          battles.push({ x: ev.x, y: ev.y, age01: age / HORIZON });
+        }
+        mapMode.drawWarOverlay(ctx, cam, {
+          settlements: latest.settlements,
+          factions: latest.factions ?? [],
+          wars: latest.wars ?? [],
+          battles,
+        }, nowMs);
+      }
       for (const sq of latest?.squads ?? []) {
         const [sx, sy] = cam.worldToScreen(sq.x, sq.y);
         ctx.font = `${Math.max(14, cam.pxPerTile)}px system-ui`;
@@ -1443,6 +1517,11 @@ ${parts.join('\n')}</body>`;
     if (now - lastStatsPoll > 5000) {
       lastStatsPoll = now;
       worker.postMessage({ t: 'stats' });
+    }
+    // war overlay legend tracks wars starting/ending while active
+    if (overlayMode === 'war' && latest && (latest.wars?.length ?? 0) !== legendWarCount) {
+      legendWarCount = latest.wars?.length ?? 0;
+      updateOverlayLegend();
     }
     requestAnimationFrame(frame);
   }

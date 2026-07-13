@@ -2,7 +2,7 @@
 // via transferable buffers (01). This file is NOT /src/sim (it may use timers).
 import { Sim } from './sim/engine';
 import { WorldConfig, defaultConfig, TICKS_PER_YEAR, JournalEntry, Journal, ACTION_NAMES, ChronicleChapter } from './shared/types';
-import { AGE_SCALE, PawnFlag, packSnapshot, snapshot, restore, unpackSnapshot } from './sim/state';
+import { AGE_SCALE, PawnFlag, packSnapshot, snapshot, restore, unpackSnapshot, pairKey } from './sim/state';
 import { scoreOffers } from './sim/systems/utilityAISystem';
 import { detectChapters, detectEra, ChapterDraft, EraDraft } from './chronicle/detector';
 import { templateChapter, draftTitle } from './chronicle/templates';
@@ -217,6 +217,16 @@ function snapshotMsg() {
       id: w.id, attacker: w.attacker, defender: w.defender,
       objective: w.objective, startTick: w.startTick,
     })),
+    pairs: (() => {
+      const out: { a: number; b: number; diplo: number; grudge: number }[] = [];
+      for (let a = 0; a < s.factions.length; a++) {
+        for (let b = a + 1; b < s.factions.length; b++) {
+          const p = s.pairs[pairKey(a, b)];
+          if (p) out.push({ a, b, diplo: p.diplo, grudge: p.grudge });
+        }
+      }
+      return out;
+    })(),
     squads: s.squads.map(sq => ({
       x: sq.x, y: sq.y, factionId: sq.factionId, state: sq.state, n: sq.members.length,
     })),
