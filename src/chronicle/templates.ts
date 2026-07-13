@@ -13,6 +13,14 @@ const OPENERS: Record<string, string> = {
   ending: 'Every people believes it will last forever. History disagrees.',
 };
 
+/** "The hosts of X" → lowercase; "Gruk declares..." → keep the name's capital. */
+function startsProperNoun(factText: string): boolean {
+  const body = factText.replace(/^Y\d+: /, '');
+  const firstWord = body.split(/\s+/)[0] ?? '';
+  // articles/pronouns are safe to lowercase; anything else treat as a name
+  return !/^(The|A|An|With|It|Hunger|Fire|Bad|Raiders|Settlers|Prospectors|Elders|Wolves|Tribute|Trade|Battle|Defeated|Exhausted)$/.test(firstWord);
+}
+
 export function templateChapter(draft: ChapterDraft, facts: WorldEvent[], title: string, era: string): ChronicleChapter {
   const paragraphs: { text: string; anchor: ChronicleAnchor }[] = [];
   const opener = OPENERS[draft.kind] ?? 'These things happened, and were remembered.';
@@ -20,7 +28,8 @@ export function templateChapter(draft: ChapterDraft, facts: WorldEvent[], title:
   for (let i = 0; i < facts.length; i += 4) {
     const group = facts.slice(i, i + 4);
     const text = (i === 0 ? opener + ' ' : '') +
-      group.map(f => f.text.replace(/^Y(\d+): /, (_, y) => `In the year ${y}, `).replace(/^In the year (\d+), ([a-z])/, (_, y, c) => `In the year ${y}, ${c}`)).join(' ');
+      group.map(f => f.text.replace(/^Y(\d+): (.)/, (_m, y: string, c: string) =>
+        `In the year ${y}, ${/[A-Z]/.test(c) && !startsProperNoun(f.text) ? c.toLowerCase() : c}`)).join(' ');
     paragraphs.push({
       text,
       anchor: {

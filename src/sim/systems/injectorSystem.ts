@@ -29,13 +29,13 @@ export function injectorSystem(s: SimState): void {
 
   // wolves: livestock/child threat near forest settlements (~1/8y)
   if (rng.chance(1, 8) && s.monsters.filter(m => m.kind === 'wolf').length < 2) {
-    const target = s.settlements.find(st => !st.razed && st.popCache > 30 &&
+    const target = s.settlements.find(st => !st.razed && st.popCache > 60 &&
       nearBiome(s, st.x, st.y, Biome.Forest, 12));
     if (target) {
       s.monsters.push({
         id: s.nextEntityId++, kind: 'wolf',
         x: target.x + 8, y: target.y + 8, hp: 60,
-        targetSettlement: target.id, ticksLeft: 2 * TICKS_PER_YEAR,
+        targetSettlement: target.id, ticksLeft: TICKS_PER_YEAR,
       });
       emitEvent(s, {
         type: EventType.WolfAttack, factions: [target.factionId],
@@ -87,7 +87,7 @@ export function injectorSystem(s: SimState): void {
 
   // plague: starts at the busiest trade hub (~1/25y), rides caravans
   if (!s.weather.plagueActive && year > 20 && rng.chance(1, 25)) {
-    const hub = s.settlements.find(st => !st.razed && st.popCache > 60);
+    const hub = s.settlements.find(st => !st.razed && st.popCache > 90);
     if (hub) {
       s.weather.plagueActive = true;
       s.plague.settlementInfections = { [hub.id]: 100 };
@@ -158,7 +158,7 @@ function stepMonsters(s: SimState): void {
         const victim = findPawnNear(s, m.x, m.y, 6);
         if (victim >= 0) {
           s.pawns.safety[victim] = 255;
-          if (rng.chance(1, 3)) killPawn(s, victim, 'monster');
+          if (rng.chance(1, 5)) killPawn(s, victim, 'monster');
         }
       }
     }

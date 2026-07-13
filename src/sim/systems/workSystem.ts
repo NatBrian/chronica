@@ -52,14 +52,16 @@ export function workSystem(s: SimState): void {
       }
       case ActionId.Forage: {
         if (st) {
-          const gain = (4 + (s.map.fertility[target] >> 5)) * rs.farmSkill / 100 | 0;
+          let gain = (4 + (s.map.fertility[target] >> 5)) * rs.farmSkill / 100 | 0;
+          if (rs.homeBiomes.includes(s.map.biome[target])) gain = (gain * 135 / 100) | 0;
           st.stockpile[Good.Grain] = Math.min(st.granaryCap, st.stockpile[Good.Grain] + gain);
         }
         break;
       }
       case ActionId.Hunt: {
         if (st) {
-          const gain = 4 + (s.map.game[target] >> 5);
+          let gain = 4 + (s.map.game[target] >> 5);
+          if (rs.homeBiomes.includes(s.map.biome[target])) gain = (gain * 135 / 100) | 0;
           st.stockpile[Good.Meat] = Math.min(st.granaryCap, st.stockpile[Good.Meat] + gain);
           s.map.game[target] = Math.max(0, s.map.game[target] - 8);
         }
@@ -77,8 +79,9 @@ export function workSystem(s: SimState): void {
         if (st) {
           const c = s.map.crop[target];
           if (c >= 200) {
-            // harvest
-            const gain = (10 + (s.map.fertility[target] >> 3)) * rs.farmSkill / 100 | 0;
+            // harvest — terrain bonds (04): race bonus on home biome
+            let gain = (10 + (s.map.fertility[target] >> 3)) * rs.farmSkill / 100 | 0;
+            if (rs.homeBiomes.includes(s.map.biome[target])) gain = (gain * 135 / 100) | 0;
             st.stockpile[Good.Grain] = Math.min(st.granaryCap, st.stockpile[Good.Grain] + gain);
             s.map.crop[target] = 0;
           } else if (c === 0 && (s.map.flags[target] & TileFlag.Farm)) {

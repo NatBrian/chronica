@@ -161,6 +161,7 @@ export interface Squad {
   warId: number;
   homeSettlement: number;
   pathIdx: number;
+  startSize: number;
 }
 
 export interface Caravan {

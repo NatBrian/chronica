@@ -43,7 +43,7 @@ export function combatSystem(s: SimState): void {
       id: squadId, factionId: st.factionId,
       x: st.x, y: st.y, targetX: st.x, targetY: st.y,
       members, morale: 235, state: 'defend',
-      warId: -1, homeSettlement: st.id, pathIdx: 0,
+      warId: -1, homeSettlement: st.id, pathIdx: 0, startSize: members.length,
     });
   }
 
@@ -291,8 +291,17 @@ function battleRound(s: SimState, a: Squad, b: Squad): void {
   }
 
   for (const [sq, other] of [[a, b], [b, a]] as const) {
-    if (sq.morale < 80 && sq.state !== 'rout') {
+    // rout on broken morale OR 40% losses — small hosts break, not evaporate
+    const broken = sq.morale < 80 || sq.members.length * 10 < sq.startSize * 6;
+    if (broken && sq.state !== 'rout') {
       sq.state = 'rout';
+      // a beaten army licks its wounds — no instant re-muster treadmill,
+      // and lost battles drain the will to fight (04: wars END)
+      if (w) {
+        w.musterCooldownUntil = Math.max(w.musterCooldownUntil ?? 0, s.tick + 320);
+        if (sq.factionId === w.attacker) w.exhaustionA += 55;
+        else w.exhaustionB += 55;
+      }
       // rout contagion (03): nearby friendly squads shaken
       for (const friend of s.squads) {
         if (friend.id === sq.id || friend.factionId !== sq.factionId) continue;
@@ -384,10 +393,28 @@ function resolveObjective(s: SimState, sq: Squad): void {
     }
     case 'conquer': {
       target.factionId = w.attacker;
+      // inhabitants flee to kin rather than change banners (04 §Refugees);
+      // only with nowhere left to run do they remain as subjects
+      const N2 = s.map.size;
+      let haven = -1, havenD = Infinity;
+      for (const other of s.settlements) {
+        if (other.razed || other.id === target.id) continue;
+        if (other.factionId !== w.defender) continue;
+        const ddx = other.x - target.x, ddy = other.y - target.y;
+        const d2 = ddx * ddx + ddy * ddy;
+        if (d2 < havenD) { havenD = d2; haven = other.id; }
+      }
       for (let i = 0; i < s.pawnCount; i++) {
         if (!(s.pawns.flags[i] & PawnFlag.Alive)) continue;
-        if (s.pawns.settlementId[i] === target.id && s.pawns.squadId[i] === 65535) {
-          s.pawns.factionId[i] = w.attacker;                // subjects change banners
+        if (s.pawns.settlementId[i] !== target.id || s.pawns.squadId[i] !== 65535) continue;
+        if (haven >= 0) {
+          const hSt = s.settlements[haven];
+          s.pawns.settlementId[i] = haven;
+          s.pawns.actionTarget[i] = hSt.y * N2 + hSt.x;
+          s.pawns.action[i] = ActionId.Flee;
+          s.pawns.flags[i] |= PawnFlag.Refugee;
+        } else {
+          s.pawns.factionId[i] = w.attacker;                // assimilated — last resort
         }
       }
       adjustLedger(s, w.defender, w.attacker, -5, `${target.name} taken`);

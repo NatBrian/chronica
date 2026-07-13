@@ -35,10 +35,13 @@ export function ruleBrainDecide(s: SimState, req: PendingDecision): DecisionResu
     switch (op) {
       case 'DECLARE_WAR': {
         const advantage = myArmy - theirArmy;
-        // desperation raids: a starving people raids regardless of odds (04 raid-EV)
-        score = (pair?.grudge ?? 0) * 14 + (advantage > 0 ? 22 : hungry ? -5 : -35)
-          + (hungry ? 40 + rs.raidAffinity / 3 : 0)
-          + (f.culture.aggression - 110) / 3;
+        // desperation raids: a starving people raids regardless of odds —
+        // but a DYING people (too few spears) hunkers down instead
+        const desperate = hungry && pop >= 90;
+        score = (pair?.grudge ?? 0) * 14 + (advantage > 0 ? 22 : desperate ? -5 : -35)
+          + (desperate ? 40 + rs.raidAffinity / 3 : 0)
+          + (f.culture.aggression - 110) / 3
+          - (pop < 90 ? 25 : 0);
         break;
       }
       case 'SUE_FOR_PEACE': {

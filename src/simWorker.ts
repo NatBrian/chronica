@@ -422,7 +422,7 @@ self.onmessage = (e: MessageEvent) => {
       const s2 = sim.state;
       post({
         t: 'searchIndex',
-        characters: s2.named.map(n => ({ id: n.id, name: n.name, role: n.role, faction: s2.factions[n.factionId]?.name ?? '', dead: n.deathTick >= 0, x: n.pawnIdx >= 0 ? s2.pawns.x[n.pawnIdx] : -1, y: n.pawnIdx >= 0 ? s2.pawns.y[n.pawnIdx] : -1, deathEventId: n.deathCauseEventId, bio: n.bio.join(' ') })),
+        characters: s2.named.map(n => ({ id: n.id, name: n.name, role: n.role, faction: s2.factions[n.factionId]?.name ?? '', dead: n.deathTick >= 0, x: n.pawnIdx >= 0 ? s2.pawns.x[n.pawnIdx] : -1, y: n.pawnIdx >= 0 ? s2.pawns.y[n.pawnIdx] : -1, deathEventId: n.deathCauseEventId, bio: n.bio.join(' '), kills: n.kills, lineage: n.parentNamedId >= 0 ? s2.named[n.parentNamedId]?.name ?? '' : '' })),
         places: s2.settlements.map(st => ({ id: st.id, name: st.name, x: st.x, y: st.y, razed: st.razed, faction: s2.factions[st.factionId]?.name ?? '' })),
         events: s2.events.filter(e => e.severity >= 3).map(e => ({ id: e.id, text: e.text, tick: e.tick, x: e.x, y: e.y })),
         chapters: chronicle.chapters.map(c => ({ id: c.id, title: c.title, era: c.era, yearStart: c.yearStart })),

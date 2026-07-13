@@ -56,12 +56,13 @@ function spawnTradeCaravans(s: SimState): void {
       const fa = s.factions[a], fb = s.factions[b];
       if (!fa || !fb || fa.extinct || fb.extinct) continue;
       const pair = s.pairs[pairKey(a, b)];
-      if (pair.embargo || pair.diplo < DiploState.Trade) continue;
+      if (pair.embargo || pair.diplo < DiploState.Neutral) continue;
       // find the best good gap between their capitals
       const sa = s.settlements.find(st => !st.razed && st.factionId === a);
       const sb = s.settlements.find(st => !st.razed && st.factionId === b);
       if (!sa || !sb) continue;
-      // grain rushes to a starving partner first (dwarves buy grain with ore — 04)
+      // grain rushes to a starving partner first (dwarves buy grain with ore — 04).
+      // Neutral neighbors sell to the hungry too; formal Trade opens the rest.
       const aStarves = effFood(sa) < 12000, bStarves = effFood(sb) < 12000;
       if (aStarves !== bStarves) {
         const src = aStarves ? sb : sa, dst = aStarves ? sa : sb;
@@ -81,6 +82,7 @@ function spawnTradeCaravans(s: SimState): void {
           continue;
         }
       }
+      if (pair.diplo < DiploState.Trade) continue;   // routine commerce needs a pact
       let bestGood = -1, bestGap = 0, dir = 0;
       for (let g = 0 as Good; g < GOOD_COUNT; g++) {
         const pa = goodPrice(sa, g), pb = goodPrice(sb, g);

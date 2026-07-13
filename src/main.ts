@@ -304,7 +304,7 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
     if (e.key === 't' || e.key === 'T') setOverlay('territory');
     if (e.key === 'p' || e.key === 'P') setOverlay('pop');
     if (e.key === 'f' || e.key === 'F') setOverlay('food');
-    if (e.key === 'W' && !e.shiftKey) setOverlay('war');   // lowercase w pans
+    if (e.key === 'W') setOverlay('war');                  // Shift+W (plain w pans)
     if (e.key === 'h' || e.key === 'H') togglePostcard();
     if (e.key === 'g' || e.key === 'G') screenshot();
   });
@@ -518,6 +518,11 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
   }
 
   document.getElementById('btn-chron-export')!.addEventListener('click', exportBook);
+  document.getElementById('btn-chron-font')!.addEventListener('click', () => {
+    rail.classList.toggle('big-font');
+    localStorage.setItem('chronica.bigfont', rail.classList.contains('big-font') ? '1' : '');
+  });
+  if (localStorage.getItem('chronica.bigfont')) rail.classList.add('big-font');
 
   function renderChronicle(msg: any): void {
     chronState = msg;
@@ -667,7 +672,7 @@ ${parts.join('\n')}</body>`;
     for (const c of searchIndex.characters) {
       if (!c.name.toLowerCase().includes(q)) continue;
       results.push({
-        label: `${c.name}${c.dead ? ' †' : ''} — ${c.role}, ${c.faction}`,
+        label: `${c.name}${c.dead ? ' †' : ''} — ${c.role}, ${c.faction}${c.lineage ? ` · line of ${c.lineage}` : ''}${c.kills > 2 ? ` · ${c.kills} kills` : ''}`,
         kind: 'character',
         act: () => {
           if (!c.dead && c.x >= 0) { renderer.camera.cx = c.x; renderer.camera.cy = c.y; renderer.camera.level = 2; worker.postMessage({ t: 'inspect', x: c.x, y: c.y }); }

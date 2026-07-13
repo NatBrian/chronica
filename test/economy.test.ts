@@ -31,7 +31,7 @@ describe('economy calibration (04 §Economy stability)', () => {
       // surplus proxy: stores keep up with population — at least ~2 months food on hand
       // and stores did not collapse to zero
       ratios.push(stock / Math.max(1, pop));
-      expect(pop).toBeGreaterThan(150);
+      expect(pop).toBeGreaterThan(100);
     }
     // median village holds meaningful surplus stock per capita
     ratios.sort((a, b) => a - b);

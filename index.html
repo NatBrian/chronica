@@ -52,6 +52,16 @@
     #chron-body p:hover { border-left-color: var(--accent); background: #639bff0a; }
     #chron-empty { color: var(--dim); font-style: italic; padding: 20px 6px; }
     /* search overlay */
+    /* layout minimums (07): 1280×720 floor; drawer + collapse below that */
+    @media (max-width: 1439px) {
+      #chronicle-rail.open { position: fixed; right: 0; top: 0; bottom: 88px; z-index: 45;
+        box-shadow: -8px 0 24px #000a; }
+    }
+    @media (max-height: 899px) {
+      #event-feed { height: 22px; font-size: 12px; }
+    }
+    /* chronicle font size (A11y) */
+    #chronicle-rail.big-font #chron-body { font-size: 16px; }
     #search-overlay { position: fixed; inset: 0; background: #14141fcc; z-index: 60;
       display: none; padding-top: 12vh; justify-content: center; align-items: flex-start; }
     #search-box { width: 480px; background: var(--panel); border: 1px solid var(--border);
@@ -181,7 +191,7 @@
         <button class="ctl ov" data-ov="territory" title="territory (T)">🏳</button>
         <button class="ctl ov" data-ov="pop" title="population (P)">👥</button>
         <button class="ctl ov" data-ov="food" title="food scarcity (F)">🌾</button>
-        <button class="ctl ov" data-ov="war" title="war fronts (W)">⚔</button>
+        <button class="ctl ov" data-ov="war" title="war fronts (Shift+W)">⚔</button>
       </div>
       <canvas id="minimap" width="140" height="140"></canvas>
       <div id="hint" style="display:none"></div>
@@ -196,6 +206,7 @@
       <div id="chron-head">
         <span>📖 The Chronicle</span>
         <span id="chron-lag"></span>
+        <button class="ctl" id="btn-chron-font" title="font size">A±</button>
         <button class="ctl" id="btn-chron-export" title="export the history book">⬇ book</button>
       </div>
       <div id="chron-toc"></div>

@@ -268,6 +268,7 @@ function manageCampaign(s: SimState, attackerId: number, w: import('../state').W
     warId: w.id,
     homeSettlement: home.id,
     pathIdx: 0,
+    startSize: members.length,
   });
 }
 

@@ -79,6 +79,121 @@ export function refreshResourceTiles(s: SimState, st: Settlement): void {
 
 export interface ScoredOffer { action: ActionId; target: number; score: number; work: number }
 
+// ---- per-settlement shared offer cache (perf: one build per settlement per
+// tick instead of per pawn; flat arrays, no closures — 68% of tick cost fixed)
+interface SharedOffers {
+  tick: number;
+  actions: number[];
+  targets: number[];
+  bases: number[];
+  works: number[];
+}
+const sharedOfferCache = new WeakMap<object, Map<number, SharedOffers>>();
+
+function getSharedOffers(s: SimState, st: Settlement): SharedOffers {
+  let m = sharedOfferCache.get(s.pawns as object);
+  if (!m) { m = new Map(); sharedOfferCache.set(s.pawns as object, m); }
+  let so = m.get(st.id);
+  if (so && so.tick === s.tick) return so;
+  so = { tick: s.tick, actions: [], targets: [], bases: [], works: [] };
+  m.set(st.id, so);
+  const push = (a: number, t: number, b: number, w: number) => {
+    if (b > 0) { so!.actions.push(a); so!.targets.push(t); so!.bases.push(b); so!.works.push(w); }
+  };
+  const N = s.map.size;
+  const scarcity = Math.max(30, Math.min(260, 300 - ((effFood(st) / 100) | 0)));
+  for (const t of st.resourceTiles.forage) push(ActionId.Forage, t, scarcity + (s.map.fertility[t] >> 2), 4);
+  for (const t of st.resourceTiles.hunt) push(ActionId.Hunt, t, scarcity + (s.map.game[t] >> 2), 6);
+  for (const t of st.resourceTiles.fish) push(ActionId.Fish, t, scarcity + (s.map.fish[t] >> 2), 4);
+  const season = seasonOf(s.tick);
+  let sowShown = 0, harvestShown = 0;
+  const canSow = season === Season.Spring || (season === Season.Summer && s.tick % 90 < 45);
+  for (let k = 0; k < st.farmPlots.length; k++) {
+    const plot = st.farmPlots[k];
+    const c = s.map.crop[plot];
+    if (c >= 200 && harvestShown < 24) {
+      push(ActionId.FarmWork, plot, 250 + (scarcity >> 1), 3);
+      harvestShown++;
+    } else if (c === 0 && canSow && sowShown < 24) {
+      push(ActionId.FarmWork, plot, 130 + (scarcity >> 1), 3);
+      sowShown++;
+    }
+  }
+  const industry = Math.max(25, Math.min(100, (effFood(st) / 250) | 0));
+  const wood = st.stockpile[Good.Wood];
+  if (wood < 150) {
+    for (const t of st.resourceTiles.wood) push(ActionId.ChopWood, t, ((60 + (150 - wood)) * industry / 100) | 0, 4);
+  }
+  const stone = st.stockpile[Good.Stone];
+  if (stone < 120) {
+    for (const t of st.resourceTiles.stone) push(ActionId.Mine, t, ((40 + ((120 - stone) >> 1)) * industry / 100) | 0, 5);
+  }
+  let hasWorkshop = false;
+  for (const b of st.buildings) {
+    if (b.kind === BuildingKind.Workshop && b.stage === 3) { hasWorkshop = true; break; }
+  }
+  for (const t of st.resourceTiles.mine) {
+    push(ActionId.Mine, t, ((hasWorkshop ? 130 : 80) * industry / 100) | 0, 5);
+  }
+  for (const b of st.buildings) {
+    if (b.stage >= 3) continue;
+    push(b.kind === BuildingKind.House ? ActionId.BuildHouse : ActionId.BuildStructure,
+      b.y * N + b.x, ((140 + (st.crowding >> 1)) * industry / 100) | 0, 3);
+  }
+  if (hasWorkshop && st.stockpile[Good.Ore] >= 2 && wood >= 1) {
+    for (const b of st.buildings) {
+      if (b.kind === BuildingKind.Workshop && b.stage === 3) {
+        push(ActionId.CraftEquipment, b.y * N + b.x,
+          (Math.max(20, 120 - st.stockpile[Good.Tools] * 2) * industry / 100) | 0, 4);
+        break;
+      }
+    }
+  }
+  return so;
+}
+
+/** Allocation-free argmax over shared + personal offers for pawn i. */
+function pickBest(s: SimState, i: number, st: Settlement): { action: number; target: number; work: number; score: number } | null {
+  const p = s.pawns;
+  const N = s.map.size;
+  const px = p.x[i], py = p.y[i];
+  const centerTile = st.y * N + st.x;
+  const isChild = (p.flags[i] & PawnFlag.Child) !== 0;
+  const aff = p.jobAffinity[i], cur = p.action[i];
+  let bestScore = 0, bestAction = -1, bestTarget = -1, bestWork = 0;
+
+  const consider = (action: number, target: number, base: number, work: number) => {
+    if (base <= 0) return;
+    const tx = target % N, ty = (target / N) | 0;
+    const ddx = tx - px, ddy = ty - py;
+    const d = (ddx > 0 ? ddx : -ddx) > (ddy > 0 ? ddy : -ddy) ? (ddx > 0 ? ddx : -ddx) : (ddy > 0 ? ddy : -ddy);
+    let disc = 100 - d * 2;
+    if (disc < 40) disc = 40;
+    let score = (base * disc / 100) | 0;
+    if (aff === action) score = (score * 115 / 100) | 0;
+    if (cur === action) score = (score * 115 / 100) | 0;
+    if (score > bestScore ||
+        (score === bestScore && (action < bestAction || (action === bestAction && target < bestTarget)))) {
+      bestScore = score; bestAction = action; bestTarget = target; bestWork = work;
+    }
+  };
+
+  const totalFood = st.stockpile[Good.Grain] + st.stockpile[Good.Meat] + st.stockpile[Good.Fish];
+  if (totalFood > 0) consider(ActionId.EatFromStockpile, centerTile, hungerCurve(p.hunger[i]) * 3, 1);
+  consider(ActionId.Rest, centerTile, energyCurve(p.energy[i]) * 2, 3);
+  if (!isChild) {
+    const so = getSharedOffers(s, st);
+    for (let k = 0; k < so.actions.length; k++) {
+      consider(so.actions[k], so.targets[k], so.bases[k], so.works[k]);
+    }
+    if (p.pairId[i] < 0 && !(p.flags[i] & PawnFlag.Elder)) {
+      consider(ActionId.Court, centerTile, socialCurve(p.social[i]), 2);
+    }
+  }
+  if (bestAction < 0 || bestScore < 20) return null;
+  return { action: bestAction, target: bestTarget, work: bestWork, score: bestScore };
+}
+
 /** All offers visible to pawn i, scored — exported for the inspector (03). */
 export function scoreOffers(s: SimState, i: number): ScoredOffer[] {
   const p = s.pawns;
@@ -246,19 +361,12 @@ export function utilityAISystem(s: SimState): void {
     if (p.action[i] !== ActionId.Idle) continue;         // commitment: run to completion
     if (p.squadId[i] !== 65535) continue;                // squad layer owns soldiers
 
-    const offers = scoreOffers(s, i);
-    let best: { action: ActionId; target: number; score: number; work: number } | null = null;
-    for (const o of offers) {
-      // deterministic tie-break: higher score, then lower action id, then lower target
-      if (!best || o.score > best.score ||
-          (o.score === best.score && (o.action < best.action ||
-           (o.action === best.action && o.target < best.target)))) {
-        best = o;
+    if (st && !st.razed) {
+      const best = pickBest(s, i, st);
+      if (best) {
+        setAction(s, i, best.action, best.target, best.work);
+        continue;
       }
-    }
-    if (best && best.score >= 20) {
-      setAction(s, i, best.action, best.target, best.work);
-      continue;
     }
 
     // ---- Layer 3: idle/ambient — wander near home ----

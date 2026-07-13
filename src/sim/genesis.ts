@@ -56,8 +56,9 @@ export function genesis(seed: number, config: WorldConfig): SimState {
       resourceTiles: { forage: [], hunt: [], fish: [], wood: [], mine: [], stone: [] },
       fertileLand: 40,
     };
-    settlement.stockpile[Good.Grain] = 2600;
-    settlement.stockpile[Good.Meat] = 500;
+    // deep larders for poor farmers: dwarves hoard grain, orcs dry meat (04)
+    settlement.stockpile[Good.Grain] = race === Race.Dwarf ? 4200 : 2600;
+    settlement.stockpile[Good.Meat] = race === Race.Orc ? 1400 : 500;
     settlement.stockpile[Good.Wood] = 800;
     settlement.stockpile[Good.Stone] = 300;
     settlement.stockpile[Good.Tools] = 100;
