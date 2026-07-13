@@ -53,6 +53,7 @@ describe('M8: the empire cycle', () => {
     st.fertileLand = 40;                  // capacity ~42+extras → crowd >> 60
     st.stockpile[Good.Grain] = 3600;
     st.stockpile[Good.Wood] = 80;
+    s.factions[0].lastExpansionTick = -(9 * TICKS_PER_YEAR);  // charter pacing satisfied
     expect(canProsperExpand(st)).toBe(true);
     expect(councilOptions(s, 0)).toContain('EXPAND');
     // and gone when poor

@@ -139,6 +139,8 @@ export interface Faction {
   foodSignalAvg: number;      // rolling per-capita food ×1000
   capital: number;            // settlement id
   vassalOf: number;           // faction id, -1 none
+  /** tick of the last chartered village (M8): expansion is paced, not a burst */
+  lastExpansionTick?: number;
   prospectEffort: number;
   llmCoverageNum: number; llmCoverageDen: number;
 }

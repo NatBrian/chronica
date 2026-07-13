@@ -6,6 +6,7 @@ import { AGE_SCALE, PawnFlag, packSnapshot, snapshot, restore, unpackSnapshot, p
 import { scoreOffers } from './sim/systems/utilityAISystem';
 import { detectChapters, detectEra, ChapterDraft, EraDraft } from './chronicle/detector';
 import { loyaltyBreakdown } from './sim/rules/loyalty';
+import { canProsperExpand, crowdPctOf, settlementCapacity } from './sim/settlementOps';
 import { templateChapter, draftTitle } from './chronicle/templates';
 import { validateChapter, chapterKnownNames } from './chronicle/validator';
 
@@ -617,6 +618,23 @@ self.onmessage = (e: MessageEvent) => {
             actorName: sim!.state.named[en.actorId]?.name ?? '?',
             factionName: sim!.state.factions[en.factionId]?.name ?? '?',
           })),
+      });
+      break;
+    }
+    case 'debugExpansion': {
+      // balance probe (M8): why is/isn't EXPAND on the table?
+      if (!sim) break;
+      const s3 = sim.state;
+      post({
+        t: 'debugExpansion',
+        rows: s3.settlements.filter(st => !st.razed).map(st => ({
+          name: st.name, pop: st.popCache,
+          crowdPct: crowdPctOf(st),
+          capacity: settlementCapacity(st),
+          grain: st.stockpile[0], wood: st.stockpile[3],
+          granaryCap: st.granaryCap,
+          prosper: canProsperExpand(st),
+        })),
       });
       break;
     }

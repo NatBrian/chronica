@@ -20,12 +20,14 @@ export function crowdPctOf(st: Settlement): number {
 }
 
 /** Prosperity charter (11 §F fix 1): rich, comfortable villages plant
- *  daughters; no need to starve first. Gates the EXPAND council option. */
+ *  daughters; no need to starve first. Gates the EXPAND council option.
+ *  Two roads there: land pressure while growing, or a brimming granary at
+ *  maturity (mature capacity is huge, so crowding alone never re-fires). */
 export function canProsperExpand(st: Settlement): boolean {
-  return crowdPctOf(st) >= 60 &&
-    st.stockpile[Good.Grain] >= (st.granaryCap * 8) / 10 &&
-    st.stockpile[Good.Wood] >= 60 &&
-    st.popCache >= 120;
+  if (st.stockpile[Good.Wood] < 60 || st.popCache < 120) return false;
+  const grain = st.stockpile[Good.Grain];
+  if (crowdPctOf(st) >= 60 && grain >= 1000) return true;
+  return grain >= (st.granaryCap * 8) / 10 && st.popCache >= 200 && st.foodFlowAvg >= 0;
 }
 
 /** Score frontier sites near `from`: fertile, far from every settlement.
@@ -107,6 +109,7 @@ export function foundSettlement(s: SimState, f: Faction, from: Settlement, x: nu
     if (founderPawn < 0) founderPawn = i;
     moved++;
   }
+  f.lastExpansionTick = s.tick;
   const ev = emitEvent(s, {
     type: EventType.SettlementFounded,
     factions: [f.id], x, y, severity: 3,

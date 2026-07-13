@@ -120,9 +120,12 @@ export function councilOptions(s: SimState, fid: number): string[] {
     }
   }
   opts.push('CONSCRIPT', 'DISBAND_SOLDIERS', 'RESERVE_STORES');
-  // EXPAND (11 §F fix 3): kings charter daughter villages from prosperity
+  // EXPAND (11 §F fix 3): kings charter daughter villages from prosperity;
+  // paced one charter per ~8y so growth reads as a story, not a burst
   const mine = s.settlements.filter(st => !st.razed && st.factionId === fid);
-  if (mine.length > 0 && mine.length < 4 && mine.some(st => canProsperExpand(st))) {
+  if (mine.length > 0 && mine.length < 4 &&
+      s.tick - (me.lastExpansionTick ?? 0) > 8 * TICKS_PER_YEAR &&
+      mine.some(st => canProsperExpand(st))) {
     opts.push('EXPAND');
   }
   return [...new Set(opts)];
