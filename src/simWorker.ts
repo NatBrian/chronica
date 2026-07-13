@@ -211,6 +211,11 @@ function snapshotMsg() {
     })),
     factions: s.factions.map(f => ({
       id: f.id, race: f.race, name: f.name, extinct: f.extinct, leaderId: f.leaderId,
+      capital: f.capital,
+    })),
+    wars: s.wars.map(w => ({
+      id: w.id, attacker: w.attacker, defender: w.defender,
+      objective: w.objective, startTick: w.startTick,
     })),
     squads: s.squads.map(sq => ({
       x: sq.x, y: sq.y, factionId: sq.factionId, state: sq.state, n: sq.members.length,

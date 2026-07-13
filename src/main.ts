@@ -5,6 +5,9 @@ import { Renderer } from './render/renderer';
 import { RenderMapData, tileColor } from './render/terrain';
 import { mountSeedBrowser, mountLayerViewer, mountSpritePreview } from './ui/devtools';
 import { bakePawnAtlas, actionToJob, SPRITE_W, SPRITE_H, PawnAtlas } from './render/sprites';
+import { bakeMapIcons } from './render/mapIcons';
+import { MapMode } from './render/mapMode';
+import { FACTION_HEX } from './render/palette';
 import { TICKS_PER_YEAR, Journal, DecisionRequest, DecisionResult, JournalEntry } from './shared/types';
 import { SaveStore, IdbBackend, SaveRecord } from './shared/saveStore';
 import { Brain } from './brain/brain';
@@ -34,14 +37,15 @@ interface WorkerSnapshot {
   inPast: boolean; presentYear: number;
   pawns: { x: Int16Array; y: Int16Array; factionId: Uint8Array; flags: Uint16Array; action: Uint8Array; count: number };
   settlements: { id: number; x: number; y: number; name: string; factionId: number; razed: boolean; pop: number; stockpile: number[]; buildings: { kind: number; x: number; y: number; stage: number }[] }[];
-  factions?: { id: number; race: number; name: string }[];
+  factions?: { id: number; race: number; name: string; extinct?: boolean; capital?: number }[];
+  wars?: { id: number; attacker: number; defender: number; objective: string; startTick: number }[];
   squads?: { x: number; y: number; factionId: number; state: string; n: number }[];
   caravans?: { x: number; y: number; factionId: number; purpose: string }[];
   monsters?: { x: number; y: number; kind: string }[];
   eventsTail: { text: string; severity: number }[];
 }
 
-const FACTION_COLORS = ['#639bff', '#6abe30', '#8a6f30', '#ac3232', '#76428a', '#5fcde4', '#d77bba', '#8f974a'];
+const FACTION_COLORS = FACTION_HEX;
 
 function bootApp(): void {
   const landing = document.getElementById('landing')!;
@@ -108,6 +112,8 @@ function bootApp(): void {
 function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journal }): void {
   const canvas = document.getElementById('world') as HTMLCanvasElement;
   const renderer = new Renderer(canvas, 512);
+  const mapIcons = bakeMapIcons();
+  let mapMode: MapMode | null = null;
   const worker = new Worker(new URL('./simWorker.ts', import.meta.url), { type: 'module' });
   const hudYear = document.getElementById('hud-year')!;
   const hudPop = document.getElementById('hud-pop')!;
@@ -188,6 +194,7 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
     switch (msg.t) {
       case 'ready': {
         renderer.setMap(msg.map as RenderMapData);
+        mapMode = new MapMode(msg.map.size, msg.map.biome);
         hudIsland.textContent = msg.islandName;
         document.title = `Chronica: ${msg.islandName}`;
         worldSeed = msg.header.seed;
@@ -1008,8 +1015,14 @@ ${parts.join('\n')}</body>`;
     if (!latest || !renderer.terrain) return;
     const ctx = renderer.ctx;
     const cam = renderer.camera;
+    // zoom contract (11 §D3): <=4 px/tile map mode, 16 hybrid, 32 full detail;
+    // crossfade rides the camera's eased pxPerTile so the world feels continuous
+    const px = cam.pxPerTile;
+    const mapAlpha = px <= 4.5 ? 1 : px >= 12 ? 0 : (12 - px) / 7.5;
+    const detailAlpha = 1 - mapAlpha;
+    ctx.globalAlpha = detailAlpha;
     // buildings (M2): simple blocks colored by faction, sized by stage
-    if (cam.pxPerTile >= 4) {
+    if (detailAlpha > 0.01 && cam.pxPerTile >= 4) {
       for (const st of latest.settlements) {
         if (st.razed) continue;
         for (const b of st.buildings) {
@@ -1025,12 +1038,12 @@ ${parts.join('\n')}</body>`;
         }
       }
     }
-    // settlement markers
-    for (const st of latest.settlements) {
+    // settlement markers (hybrid/local zoom; map mode owns far zoom)
+    if (detailAlpha > 0.01) for (const st of latest.settlements) {
       if (st.razed) continue;
       const [sx, sy] = cam.worldToScreen(st.x + 0.5, st.y + 0.5);
       if (sx < -20 || sy < -20 || sx > cam.viewW + 20 || sy > cam.viewH + 20) continue;
-      ctx.fillStyle = ['#639bff', '#6abe30', '#8a6f30', '#ac3232'][st.factionId] ?? '#fff';
+      ctx.fillStyle = FACTION_COLORS[st.factionId] ?? '#fff';
       const r = Math.max(3, cam.pxPerTile * 0.6);
       ctx.fillRect(Math.round(sx - r / 2), Math.round(sy - r / 2), Math.round(r), Math.round(r));
       if (cam.pxPerTile >= 4) {
@@ -1040,7 +1053,7 @@ ${parts.join('\n')}</body>`;
       }
     }
     // squads: banner markers; caravans: wagon dots; monsters: big glyphs (M6)
-    for (const sq of latest.squads ?? []) {
+    if (detailAlpha > 0.01) for (const sq of latest.squads ?? []) {
       const [sx, sy] = cam.worldToScreen(sq.x, sq.y);
       if (sx < -20 || sy < -20 || sx > cam.viewW + 20 || sy > cam.viewH + 20) continue;
       ctx.fillStyle = FACTION_COLORS[sq.factionId] ?? '#fff';
@@ -1069,7 +1082,7 @@ ${parts.join('\n')}</body>`;
     }
 
     // pawns: dots at region zoom, sprites at local/close
-    if (cam.pxPerTile >= 4) {
+    if (detailAlpha > 0.01 && cam.pxPerTile >= 4) {
       const p = latest.pawns;
       const useSprites = cam.pxPerTile >= 16;
       const spriteScale = cam.pxPerTile >= 32 ? 2 : 1;
@@ -1092,6 +1105,18 @@ ${parts.join('\n')}</body>`;
           ctx.fillRect(Math.round(sx), Math.round(sy), 1, 1);
         }
       }
+    }
+    ctx.globalAlpha = 1;
+    // far-zoom map mode layer (11 §D): fades in as detail fades out
+    if (mapMode && mapAlpha > 0.01) {
+      mapMode.draw(ctx, cam, mapIcons, {
+        settlements: latest.settlements,
+        squads: latest.squads ?? [],
+        factions: latest.factions ?? [],
+        wars: latest.wars ?? [],
+        caravans: latest.caravans ?? [],
+        monsters: latest.monsters ?? [],
+      }, mapAlpha, performance.now());
     }
   }
 

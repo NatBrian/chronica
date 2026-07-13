@@ -28,6 +28,11 @@ export const FACTION_RAMPS: readonly (readonly [number, number, number, number])
   [P.red, P.salmon, P.maroon, P.charcoal],         // faction 3 (orcs)
 ];
 
+/** Faction UI colors (8 slots; 4-7 reserved for M9 faction births). */
+export const FACTION_HEX: readonly string[] = [
+  '#639bff', '#6abe30', '#8a6f30', '#ac3232', '#76428a', '#5fcde4', '#d77bba', '#8f974a',
+];
+
 /** Seasonal grading tints (r,g,b multipliers ×100). */
 export const SEASON_TINT: readonly (readonly [number, number, number])[] = [
   [100, 104, 100], // spring; slightly lusher greens

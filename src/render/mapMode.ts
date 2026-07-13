@@ -1,0 +1,251 @@
+// Far-zoom map mode (11 §D): at World/Region zoom the island stops being
+// shrunken pixels and becomes a *map*: faction territory tint + chunky
+// borders, settlement icons with always-on labels, army banners, battle
+// icons. Pure render layer: reads snapshots, never touches sim state.
+import { Camera } from './camera';
+import { FACTION_HEX } from './palette';
+import { MapIconAtlas, ICON_W, ICON_H, popTier } from './mapIcons';
+
+/** Blocks are 8×8 tiles: zone-quantized chunky borders (doc 12 §P5). */
+export const BLOCK_TILES = 8;
+
+export interface MapModeSettlement {
+  id: number; x: number; y: number; name: string; factionId: number;
+  razed: boolean; pop: number;
+}
+export interface MapModeSquad { x: number; y: number; factionId: number; state: string; n: number }
+export interface MapModeFaction { id: number; race: number; name: string; extinct?: boolean; capital?: number }
+export interface MapModeWar { attacker: number; defender: number }
+
+const CLAIM_RADIUS = 60;          // tiles; matches the v1 territory overlay
+
+export class MapMode {
+  private grid: Int8Array;        // block → factionId, -1 unclaimed
+  private gridW: number;
+  private key = '';
+  private tint: HTMLCanvasElement;
+  private borders: { bx: number; by: number; dir: 0 | 1; a: number; b: number }[] = [];
+
+  constructor(private mapSize: number, private biome: Uint8Array | number[]) {
+    this.gridW = Math.ceil(mapSize / BLOCK_TILES);
+    this.grid = new Int8Array(this.gridW * this.gridW).fill(-1);
+    this.tint = document.createElement('canvas');
+    this.tint.width = this.gridW; this.tint.height = this.gridW;
+  }
+
+  private isLand(tx: number, ty: number): boolean {
+    const b = this.biome[ty * this.mapSize + tx];
+    return b !== 0 && b !== 1 && b !== 2;
+  }
+
+  /** Recompute claims when settlements change (nearest living settlement). */
+  private refresh(settlements: MapModeSettlement[]): void {
+    const key = settlements.map(s => `${s.id}${s.factionId}${s.razed ? 'r' : ''}`).join(',');
+    if (key === this.key) return;
+    this.key = key;
+    const W = this.gridW;
+    const alive = settlements.filter(s => !s.razed);
+    const R2 = CLAIM_RADIUS * CLAIM_RADIUS;
+    for (let by = 0; by < W; by++) {
+      for (let bx = 0; bx < W; bx++) {
+        const cx = bx * BLOCK_TILES + BLOCK_TILES / 2;
+        const cy = by * BLOCK_TILES + BLOCK_TILES / 2;
+        let owner = -1;
+        if (cx < this.mapSize && cy < this.mapSize && this.isLand(cx | 0, cy | 0)) {
+          let bestD = R2;
+          for (const s of alive) {
+            const dx = s.x - cx, dy = s.y - cy;
+            const d = dx * dx + dy * dy;
+            if (d < bestD) { bestD = d; owner = s.factionId; }
+          }
+        }
+        this.grid[by * W + bx] = owner;
+      }
+    }
+    // tint canvas: one pixel per block, upscaled with smoothing off
+    const tctx = this.tint.getContext('2d')!;
+    const img = tctx.createImageData(W, W);
+    for (let i = 0; i < W * W; i++) {
+      const f = this.grid[i];
+      if (f < 0) continue;
+      const col = FACTION_HEX[f] ?? '#ffffff';
+      const o = i * 4;
+      img.data[o] = parseInt(col.slice(1, 3), 16);
+      img.data[o + 1] = parseInt(col.slice(3, 5), 16);
+      img.data[o + 2] = parseInt(col.slice(5, 7), 16);
+      img.data[o + 3] = 34;                       // ~13% wash (11 §C1)
+    }
+    tctx.putImageData(img, 0, 0);
+    // border segments: right (dir 0) and down (dir 1) neighbor mismatches
+    this.borders = [];
+    for (let by = 0; by < W; by++) {
+      for (let bx = 0; bx < W; bx++) {
+        const a = this.grid[by * W + bx];
+        if (bx + 1 < W) {
+          const b = this.grid[by * W + bx + 1];
+          if (a !== b && (a >= 0 || b >= 0)) this.borders.push({ bx, by, dir: 0, a, b });
+        }
+        if (by + 1 < W) {
+          const b = this.grid[(by + 1) * W + bx];
+          if (a !== b && (a >= 0 || b >= 0)) this.borders.push({ bx, by, dir: 1, a, b });
+        }
+      }
+    }
+  }
+
+  draw(
+    ctx: CanvasRenderingContext2D, cam: Camera, icons: MapIconAtlas,
+    snap: {
+      settlements: MapModeSettlement[]; squads: MapModeSquad[];
+      factions: MapModeFaction[]; wars: MapModeWar[];
+      caravans: { x: number; y: number; factionId: number }[];
+      monsters: { x: number; y: number; kind: string }[];
+    },
+    alpha: number, now: number,
+  ): void {
+    if (alpha <= 0.01) return;
+    this.refresh(snap.settlements);
+    const prevAlpha = ctx.globalAlpha;
+    ctx.globalAlpha = alpha;
+
+    // flatten terrain contrast so icons pop (11 §D1), then territory wash
+    const [ox, oy] = cam.worldToScreen(0, 0);
+    const mapPx = this.mapSize * cam.pxPerTile;
+    ctx.globalAlpha = alpha * 0.22;
+    ctx.fillStyle = '#1a1c2c';
+    ctx.fillRect(ox, oy, mapPx, mapPx);
+    ctx.globalAlpha = alpha;
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(this.tint, ox, oy, mapPx, mapPx);
+
+    // chunky borders; at-war faction pairs pulse red (11 §D2)
+    const atWar = new Set<number>();
+    for (const w of snap.wars) {
+      atWar.add(Math.min(w.attacker, w.defender) * 16 + Math.max(w.attacker, w.defender));
+    }
+    const B = BLOCK_TILES * cam.pxPerTile;
+    const pulse = 0.55 + 0.45 * Math.sin(now / 260);
+    for (const seg of this.borders) {
+      const sx = ox + seg.bx * B, sy = oy + seg.by * B;
+      const warring = seg.a >= 0 && seg.b >= 0 &&
+        atWar.has(Math.min(seg.a, seg.b) * 16 + Math.max(seg.a, seg.b));
+      if (warring) {
+        ctx.globalAlpha = alpha * pulse;
+        ctx.fillStyle = '#d95763';
+        if (seg.dir === 0) ctx.fillRect(Math.round(sx + B) - 1, Math.round(sy), 3, Math.ceil(B));
+        else ctx.fillRect(Math.round(sx), Math.round(sy + B) - 1, Math.ceil(B), 3);
+        ctx.globalAlpha = alpha;
+        continue;
+      }
+      // each owner strokes its own side of the fence
+      if (seg.dir === 0) {
+        if (seg.a >= 0) { ctx.fillStyle = FACTION_HEX[seg.a]; ctx.fillRect(Math.round(sx + B) - 1, Math.round(sy), 1, Math.ceil(B)); }
+        if (seg.b >= 0) { ctx.fillStyle = FACTION_HEX[seg.b]; ctx.fillRect(Math.round(sx + B), Math.round(sy), 1, Math.ceil(B)); }
+      } else {
+        if (seg.a >= 0) { ctx.fillStyle = FACTION_HEX[seg.a]; ctx.fillRect(Math.round(sx), Math.round(sy + B) - 1, Math.ceil(B), 1); }
+        if (seg.b >= 0) { ctx.fillStyle = FACTION_HEX[seg.b]; ctx.fillRect(Math.round(sx), Math.round(sy + B), Math.ceil(B), 1); }
+      }
+    }
+
+    // caravans: cart pictogram on route (11 §D1); monsters: glyphs stay visible
+    for (const c of snap.caravans) {
+      const [sx, sy] = cam.worldToScreen(c.x, c.y);
+      if (sx < -20 || sy < -20 || sx > cam.viewW + 20 || sy > cam.viewH + 20) continue;
+      ctx.fillStyle = '#d9a066';
+      ctx.fillRect(Math.round(sx) - 3, Math.round(sy) - 2, 7, 4);
+      ctx.fillStyle = '#1a1c2c';
+      ctx.fillRect(Math.round(sx) - 2, Math.round(sy) + 2, 2, 2);
+      ctx.fillRect(Math.round(sx) + 1, Math.round(sy) + 2, 2, 2);
+      ctx.fillStyle = FACTION_HEX[c.factionId] ?? '#fff';
+      ctx.fillRect(Math.round(sx) - 3, Math.round(sy) - 4, 3, 2);
+    }
+    for (const m of snap.monsters) {
+      const [sx, sy] = cam.worldToScreen(m.x, m.y);
+      if (sx < -30 || sy < -30 || sx > cam.viewW + 30 || sy > cam.viewH + 30) continue;
+      ctx.font = `${m.kind === 'dragon' ? 20 : 14}px system-ui`;
+      ctx.fillText(m.kind === 'dragon' ? '🐉' : m.kind === 'troll' ? '🧌' : '🐺', sx, sy);
+    }
+
+    // settlement icons + always-on labels (11 §D1)
+    const S = 2;                                  // icon pixel scale (screen-space)
+    ctx.font = '600 11px system-ui';
+    ctx.textBaseline = 'top';
+    for (const st of snap.settlements) {
+      if (st.razed) continue;
+      const [sx, sy] = cam.worldToScreen(st.x + 0.5, st.y + 0.5);
+      if (sx < -80 || sy < -80 || sx > cam.viewW + 80 || sy > cam.viewH + 80) continue;
+      const race = snap.factions[st.factionId]?.race ?? 0;
+      const tier = popTier(st.pop);
+      const cell = icons.index[`${race}:${tier}`];
+      const iw = ICON_W * S, ih = ICON_H * S;
+      const ix = Math.round(sx - iw / 2), iy = Math.round(sy - ih + 4);
+      if (cell) {
+        // dark halo so icons read against any biome
+        ctx.fillStyle = '#14141f99';
+        ctx.beginPath();
+        ctx.ellipse(sx, iy + ih / 2 + 2, iw / 2 + 4, ih / 2 + 4, 0, 0, 7);
+        ctx.fill();
+        ctx.drawImage(icons.canvas as CanvasImageSource, cell.x, cell.y, ICON_W, ICON_H, ix, iy, iw, ih);
+      }
+      // faction pennant above the icon
+      const fcol = FACTION_HEX[st.factionId] ?? '#fff';
+      ctx.fillStyle = '#1a1c2c';
+      ctx.fillRect(Math.round(sx) - 1, iy - 10, 2, 12);
+      ctx.fillStyle = fcol;
+      ctx.fillRect(Math.round(sx) + 1, iy - 10, 8, 5);
+      // capital crown pip (11 §D2)
+      if (snap.factions[st.factionId]?.capital === st.id) {
+        ctx.fillStyle = '#fbf236';
+        ctx.fillRect(Math.round(sx) - 4, iy - 14, 2, 3);
+        ctx.fillRect(Math.round(sx) - 1, iy - 15, 2, 4);
+        ctx.fillRect(Math.round(sx) + 2, iy - 14, 2, 3);
+      }
+      // name label chip + pop badge, always on at far zoom
+      const label = st.name;
+      const wLabel = ctx.measureText(label).width;
+      const pop = String(st.pop);
+      ctx.font = '600 11px system-ui';
+      const lx = Math.round(sx - wLabel / 2), ly = iy + ih + 2;
+      ctx.fillStyle = '#14141fc8';
+      ctx.fillRect(lx - 4, ly - 2, wLabel + 8, 15);
+      ctx.fillStyle = fcol;
+      ctx.fillRect(lx - 4, ly - 2, 2, 15);
+      ctx.fillStyle = '#cbdbfc';
+      ctx.fillText(label, lx, ly);
+      ctx.font = '10px system-ui';
+      ctx.fillStyle = '#9badb7';
+      const wPop = ctx.measureText(pop).width;
+      ctx.fillText(pop, Math.round(sx - wPop / 2), ly + 15);
+      ctx.font = '600 11px system-ui';
+    }
+
+    // armies as banner icons + soldier count (11 §D1)
+    for (const sq of snap.squads) {
+      const [sx, sy] = cam.worldToScreen(sq.x, sq.y);
+      if (sx < -40 || sy < -40 || sx > cam.viewW + 40 || sy > cam.viewH + 40) continue;
+      const fcol = FACTION_HEX[sq.factionId] ?? '#fff';
+      ctx.fillStyle = '#1a1c2c';
+      ctx.fillRect(Math.round(sx), Math.round(sy) - 18, 2, 18);
+      ctx.fillStyle = fcol;
+      ctx.fillRect(Math.round(sx) + 2, Math.round(sy) - 18, 11, 7);
+      ctx.fillStyle = '#14141fc8';
+      const cnt = String(sq.n);
+      const wc = ctx.measureText(cnt).width;
+      ctx.fillRect(Math.round(sx) - 2, Math.round(sy) + 2, wc + 6, 13);
+      ctx.fillStyle = '#cbdbfc';
+      ctx.fillText(cnt, Math.round(sx) + 1, Math.round(sy) + 3);
+      // battle: pulsing crossed swords over the tile (11 §D1)
+      if (sq.state === 'fight') {
+        const cell = icons.index['swords'];
+        if (cell) {
+          const bs = S * (1.6 + 0.5 * (0.5 + 0.5 * Math.sin(now / 200)));
+          ctx.drawImage(icons.canvas as CanvasImageSource, cell.x, cell.y, ICON_W, ICON_H,
+            Math.round(sx - ICON_W * bs / 2), Math.round(sy - 30 - ICON_H * bs / 2),
+            ICON_W * bs, ICON_H * bs);
+        }
+      }
+    }
+
+    ctx.globalAlpha = prevAlpha;
+  }
+}
