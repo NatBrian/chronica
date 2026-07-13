@@ -56,6 +56,12 @@ export function findExpansionSite(s: SimState, from: Settlement): [number, numbe
       if (st.razed) continue;
       const dx = st.x - x, dy = st.y - y;
       if (dx * dx + dy * dy < 22 * 22) { tooClose = true; break; }
+      // territorial respect: charter your own hinterland, never a site that
+      // sits closer to a foreign settlement than to the mother village
+      // (leapfrog expansion strangled weak neighbors; early-extinction gate)
+      if (st.factionId !== from.factionId && dx * dx + dy * dy < dist * dist) {
+        tooClose = true; break;
+      }
     }
     if (tooClose) continue;
     let fert = 0;

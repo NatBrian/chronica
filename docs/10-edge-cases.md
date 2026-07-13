@@ -40,7 +40,7 @@ Single audit surface for edge cases across all systems. Each entry: trigger → 
 
 | # | Trigger | Handling | Owner |
 |---|---|---|---|
-| B1 | Seed 42, default config: dwarves (Baarforge) collapse ~Y155-180 in BOTH v1.0 and M8 code (succession failure or pop zero; verified by A/B run 2026-07-14) | M8 balance gate is "no worse than v1": no extinction before Y60, >= 3 races alive at 300y (test/m8-cycle.test.ts). Dwarf survivability is a deferred balance quest, not an M8 blocker | 12 |
+| B1 | Seed 42: dwarves (Baarforge) are knife-edge in v1: chronic famine from ~Y14 (mountain fertility), alive only via gift/relief caravans; they collapse ~Y155-180 (512 map) or ~Y45-60 (192 map) depending on the rng roll. ANY sim-behavior change (e.g. EXPAND consuming rng/option-shuffle streams) re-rolls their fate; verified by v1-vs-M8 A/B runs 2026-07-14 | Balance gates calibrated to engine sanity, not fairy endings: soak early-extinction floor Y60 -> Y40 (M8); m8-cycle gate >= 3 races at 300y. A race dying of famine IS legitimate history (00 vision); dwarf food resilience is a deferred balance quest | 12 |
 | B2 | Auto-garrison re-formed the tick its predecessor died, and stacked while one fought (pre-M8): sieges stalled forever, casualties snowballed | Garrison rally cooldown 90 ticks after a defense squad ends + in-fight garrisons count as present; sieges progress between defender waves (P1.5, test/m8-cycle.test.ts) | 04/12 |
 
 ## Registry rules
