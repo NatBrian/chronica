@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Chronica</title>
+  <style>
+    :root {
+      --bg: #14141f; --panel: #1c1c2b; --panel2: #23233a; --border: #34345230;
+      --text: #cbdbfc; --dim: #9badb7; --accent: #639bff; --warn: #d95763;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(--text);
+      font-family: system-ui, 'Segoe UI', Roboto, sans-serif; font-size: 14px; }
+    #app { display: grid; height: 100vh;
+      grid-template-columns: 1fr auto;
+      grid-template-rows: 1fr auto auto;
+      grid-template-areas: "world chronicle" "feed feed" "timeline timeline"; }
+    #world-wrap { grid-area: world; position: relative; overflow: hidden; }
+    #world { width: 100%; height: 100%; display: block; image-rendering: pixelated; cursor: grab; }
+    #world.dragging { cursor: grabbing; }
+    #hud { position: absolute; top: 10px; left: 10px; background: #14141fcc;
+      padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border);
+      font-variant-numeric: tabular-nums; pointer-events: none; }
+    #hud .era { color: var(--dim); font-size: 12px; }
+    #chronicle-rail { grid-area: chronicle; width: 0; background: var(--panel);
+      border-left: 1px solid var(--border); overflow-y: auto; transition: width .2s; }
+    #chronicle-rail.open { width: 340px; }
+    #event-feed { grid-area: feed; height: 28px; background: var(--panel);
+      border-top: 1px solid var(--border); overflow: hidden; display: flex; align-items: center;
+      padding: 0 10px; gap: 18px; white-space: nowrap; color: var(--dim); font-size: 13px; }
+    #timeline-bar { grid-area: timeline; background: var(--panel2); border-top: 1px solid var(--border);
+      padding: 8px 12px; display: flex; align-items: center; gap: 12px; }
+    #timeline { flex: 1; height: 26px; position: relative; cursor: pointer;
+      background: #14141f; border-radius: 4px; }
+    .tl-cursor { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--accent); }
+    button.ctl { background: var(--panel); color: var(--text); border: 1px solid var(--border);
+      border-radius: 4px; padding: 4px 10px; cursor: pointer; font-size: 13px; }
+    button.ctl:hover { background: var(--panel2); border-color: var(--accent); }
+    button.ctl.active { background: var(--accent); color: #14141f; }
+    #year-label { min-width: 90px; text-align: center; font-variant-numeric: tabular-nums; }
+    /* landing overlay */
+    #landing { position: fixed; inset: 0; background: var(--bg); z-index: 50;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; }
+    #landing h1 { font-size: 42px; letter-spacing: 8px; color: var(--text); font-weight: 300; }
+    #landing .sub { color: var(--dim); margin-bottom: 20px; }
+    #landing .row { display: flex; gap: 10px; align-items: center; }
+    #landing input { background: var(--panel); border: 1px solid var(--border); color: var(--text);
+      padding: 8px 12px; border-radius: 4px; width: 140px; font-size: 15px; }
+    #landing button { font-size: 15px; padding: 8px 18px; }
+    #llm-status { color: var(--dim); font-size: 13px; margin-top: 10px; }
+    #gen-preview { width: 256px; height: 256px; image-rendering: pixelated;
+      border: 1px solid var(--border); border-radius: 6px; display: none; }
+  </style>
+</head>
+<body>
+  <div id="landing">
+    <h1>CHRONICA</h1>
+    <div class="sub">Watch a world write its own history.</div>
+    <canvas id="gen-preview" width="256" height="256"></canvas>
+    <div class="row">
+      <input id="seed-input" type="text" placeholder="seed" value="42" />
+      <button class="ctl" id="btn-random">Random</button>
+      <button class="ctl" id="btn-begin">Begin History</button>
+    </div>
+    <div id="llm-status">Checking for local kings...</div>
+    <div id="resume-list"></div>
+  </div>
+  <div id="app">
+    <div id="world-wrap">
+      <canvas id="world"></canvas>
+      <div id="hud"><span id="hud-year">Year 0</span> · <span id="hud-pop">—</span><div class="era" id="hud-island"></div></div>
+    </div>
+    <div id="chronicle-rail"></div>
+    <div id="event-feed"></div>
+    <div id="timeline-bar">
+      <button class="ctl" id="btn-pause">⏸</button>
+      <button class="ctl speed" data-s="1">1×</button>
+      <button class="ctl speed active" data-s="4">4×</button>
+      <button class="ctl speed" data-s="16">16×</button>
+      <div id="timeline"><div class="tl-cursor" style="left:0"></div></div>
+      <div id="year-label">Year 0</div>
+    </div>
+  </div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
