@@ -505,9 +505,38 @@ self.onmessage = (e: MessageEvent) => {
       post({
         t: 'feed',
         events: evs.map(ev => ({
-          id: ev.id, tick: ev.tick, severity: ev.severity, x: ev.x, y: ev.y,
+          id: ev.id, tick: ev.tick, type: ev.type, severity: ev.severity, x: ev.x, y: ev.y,
           text: ev.text, hasCauses: ev.causes.length > 0,
         })),
+      });
+      break;
+    }
+    case 'allEvents': {
+      // Events tab (11 §G1): the full log, filtered client-side
+      if (!sim) break;
+      const minSev = (msg.minSeverity as number) ?? 2;
+      post({
+        t: 'allEvents',
+        events: sim.state.events.filter(ev => ev.severity >= minSev).map(ev => ({
+          id: ev.id, tick: ev.tick, type: ev.type, severity: ev.severity, x: ev.x, y: ev.y,
+          text: ev.text, factions: ev.factions, hasCauses: ev.causes.length > 0,
+        })),
+      });
+      break;
+    }
+    case 'councilLog': {
+      // Councils tab (11 §G1): every applied decision, verbatim reasoning
+      if (!sim) break;
+      post({
+        t: 'councilLog',
+        entries: sim.journal.entries
+          .filter(en => !en.void && en.applyAtTick <= sim!.state.tick)
+          .map(en => ({
+            seq: en.seq, applyAtTick: en.applyAtTick, factionId: en.factionId,
+            choice: en.choice, reasoning: en.reasoning, source: en.source,
+            actorName: sim!.state.named[en.actorId]?.name ?? '?',
+            factionName: sim!.state.factions[en.factionId]?.name ?? '?',
+          })),
       });
       break;
     }

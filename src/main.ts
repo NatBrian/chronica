@@ -8,6 +8,7 @@ import { bakePawnAtlas, actionToJob, SPRITE_W, SPRITE_H, PawnAtlas } from './ren
 import { bakeMapIcons } from './render/mapIcons';
 import { MapMode } from './render/mapMode';
 import { FACTION_HEX } from './render/palette';
+import { eventMeta, CATEGORY_LIST, CATEGORY_COLOR, EventCategory } from './ui/eventMeta';
 import { TICKS_PER_YEAR, Journal, DecisionRequest, DecisionResult, JournalEntry } from './shared/types';
 import { SaveStore, IdbBackend, SaveRecord } from './shared/saveStore';
 import { Brain } from './brain/brain';
@@ -227,11 +228,24 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
       case 'eraToast':
         toast(`A new era: ${msg.name}`, msg.summary.slice(0, 90) + '…', false, () => openChronicle());
         break;
+      case 'allEvents':
+        allEvents = msg.events;
+        renderEvents();
+        break;
+      case 'councilLog':
+        councilEntries = msg.entries;
+        renderCouncils();
+        break;
       case 'searchIndex': searchIndexArrived(msg); break;
       case 'inspection': showInspector(msg.pawn); break;
       case 'seeked': {
         seekStatus.style.display = 'none';
         setReplayUI(msg.inPast);
+        const toYear = Math.floor(msg.tick / TICKS_PER_YEAR);
+        if (seekFromYear >= 0 && Math.abs(toYear - seekFromYear) > 5) {
+          showDigest(seekFromYear, toYear);
+        }
+        seekFromYear = -1;
         break;
       }
       case 'reachedPresent': setReplayUI(false); break;
@@ -267,7 +281,7 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
 
   // ---- controls ----
   const btnPause = document.getElementById('btn-pause')!;
-  btnPause.addEventListener('click', () => { paused = !paused; btnPause.textContent = paused ? '▶' : '⏸'; applySpeed(); });
+  btnPause.addEventListener('click', () => { paused = !paused; btnPause.textContent = paused ? '▶' : '⏸'; applySpeed(); updateReadingMode(); });
   document.querySelectorAll('button.speed').forEach(b => {
     b.addEventListener('click', () => {
       document.querySelectorAll('button.speed').forEach(x => x.classList.remove('active'));
@@ -277,7 +291,10 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
       applySpeed();
     });
   });
-  btnPresent.addEventListener('click', () => worker.postMessage({ t: 'jumpPresent' }));
+  btnPresent.addEventListener('click', () => {
+    seekFromYear = latest ? latest.year : -1;
+    worker.postMessage({ t: 'jumpPresent' });
+  });
   document.getElementById('btn-export')!.addEventListener('click', () => worker.postMessage({ t: 'exportJournal' }));
   const importFile = document.getElementById('import-file') as HTMLInputElement;
   document.getElementById('btn-import')!.addEventListener('click', () => importFile.click());
@@ -300,6 +317,7 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
       councilPanel.style.display = 'none';
       chainView.style.display = 'none';
       inspectorEl.style.display = 'none';
+      digestCard.style.display = 'none';
       return;
     }
     if (e.target instanceof HTMLInputElement) return;
@@ -320,8 +338,12 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
     if (e.key === ',' && paused) stepSeek(0.25);
     if (e.key === '.' && paused) stepSeek(1);
     if (e.key === 'c' || e.key === 'C') {
-      if (rail.classList.contains('open')) rail.classList.remove('open');
+      if (rail.classList.contains('open')) closeRail();
       else openChronicle();
+    }
+    if (e.key === 'e' || e.key === 'E') {
+      if (rail.classList.contains('open') && activeTab === 'events') closeRail();
+      else openRail('events');
     }
     if (e.key === '/') { e.preventDefault(); openSearch(); }
     if (e.key === 't' || e.key === 'T') setOverlay('territory');
@@ -406,6 +428,7 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
   }
 
   function doSeek(year: number): void {
+    seekFromYear = latest ? latest.year : -1;
     seekStatus.textContent = `Traveling to Year ${Math.floor(year)}...`;
     seekStatus.style.display = 'block';
     worker.postMessage({ t: 'seek', year });
@@ -472,8 +495,14 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
     const isWar = msg.entry.choice.startsWith('DECLARE_WAR') || msg.entry.choice === 'RAZE';
     const isMajor = isWar || msg.entry.choice.startsWith('SUE_FOR_PEACE') ||
       msg.entry.choice.startsWith('ALLY_AGAINST') || msg.kind === 'postWar';
-    // rate-limit: only toast notable decisions (or LLM ones)
-    if (!isMajor && msg.entry.source === 'fallback') return;
+    // G3 hierarchy: only tier-1 decisions toast; the rest land silently in
+    // the Councils tab with a badge increment
+    if (!(activeTab === 'councils' && rail.classList.contains('open'))) {
+      clUnread++; updateBadges();
+    } else {
+      worker.postMessage({ t: 'councilLog' });
+    }
+    if (!isMajor) return;
     toast(
       `${msg.actorName} has made a decision`,
       msg.entry.choice.split('(')[0].replace(/_/g, ' ').toLowerCase(),
@@ -531,13 +560,191 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
   const narrateBacklog: any[] = [];
 
   function openChronicle(chapterId?: number): void {
+    openRail('chronicle', chapterId);
+  }
+
+  // ---- history panel: one tabbed home for all narrative (11 §G1) ----
+  const railTabs = document.querySelectorAll<HTMLElement>('.rtab');
+  const badgeEvents = document.getElementById('badge-events')!;
+  const badgeCouncils = document.getElementById('badge-councils')!;
+  const evList = document.getElementById('ev-list')!;
+  const evFiltersEl = document.getElementById('ev-filters')!;
+  const clList = document.getElementById('cl-list')!;
+  const clFiltersEl = document.getElementById('cl-filters')!;
+  interface LogEvent { id: number; tick: number; type: number; severity: number; x: number; y: number; text: string; factions: number[]; hasCauses: boolean }
+  let activeTab = 'chronicle';
+  let allEvents: LogEvent[] = [];
+  let evUnread = 0, clUnread = 0, lastSeenEventId = -1;
+  let lastEventsRequest = 0;
+  let councilEntries: any[] = [];
+  const catOn: Record<EventCategory, boolean> = { war: true, politics: true, disaster: true, economy: true, life: true };
+  let evMinSev = 2;
+  let clFaction = -1;
+
+  function openRail(tab: string, chapterId?: number): void {
     rail.classList.add('open');
-    worker.postMessage({ t: 'requestChronicle' });
-    if (chapterId !== undefined) {
-      setTimeout(() => {
-        document.getElementById(`ch-${chapterId}`)?.scrollIntoView({ behavior: 'smooth' });
-      }, 300);
+    activeTab = tab;
+    railTabs.forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+    for (const t of ['chronicle', 'events', 'councils', 'stats']) {
+      (document.getElementById(`tab-${t}`) as HTMLElement).style.display = t === tab ? '' : 'none';
     }
+    if (tab === 'chronicle') {
+      worker.postMessage({ t: 'requestChronicle' });
+      if (chapterId !== undefined) {
+        setTimeout(() => {
+          document.getElementById(`ch-${chapterId}`)?.scrollIntoView({ behavior: 'smooth' });
+        }, 300);
+      }
+    } else if (tab === 'events') {
+      worker.postMessage({ t: 'allEvents', minSeverity: 2 });
+      lastEventsRequest = performance.now();
+      evUnread = 0; updateBadges();
+    } else if (tab === 'councils') {
+      worker.postMessage({ t: 'councilLog' });
+      clUnread = 0; updateBadges();
+    }
+    updateReadingMode();
+  }
+  railTabs.forEach(b => b.addEventListener('click', () => openRail(b.dataset.tab!)));
+
+  function closeRail(): void {
+    rail.classList.remove('open');
+    updateReadingMode();
+  }
+
+  function updateBadges(): void {
+    badgeEvents.textContent = String(evUnread);
+    badgeEvents.style.display = evUnread > 0 ? 'inline' : 'none';
+    badgeCouncils.textContent = String(clUnread);
+    badgeCouncils.style.display = clUnread > 0 ? 'inline' : 'none';
+  }
+
+  /** Reading mode (11 §G4): paused + panel open = wide rail, dimmed world. */
+  function updateReadingMode(): void {
+    document.body.classList.toggle('reading', paused && rail.classList.contains('open'));
+  }
+
+  // Events tab: filter chips + severity slider (11 §G1)
+  for (const cat of CATEGORY_LIST) {
+    const chip = document.createElement('button');
+    chip.className = 'fchip on';
+    chip.textContent = cat;
+    chip.style.setProperty('--fc', CATEGORY_COLOR[cat]);
+    chip.addEventListener('click', () => {
+      catOn[cat] = !catOn[cat];
+      chip.classList.toggle('on', catOn[cat]);
+      renderEvents();
+    });
+    evFiltersEl.appendChild(chip);
+  }
+  const sevWrap = document.createElement('span');
+  sevWrap.style.cssText = 'margin-left:auto;color:#9badb7;font-size:11px;display:flex;align-items:center;gap:4px';
+  sevWrap.innerHTML = 'sev <input id="ev-sev" type="range" min="2" max="5" value="2" style="width:60px">';
+  evFiltersEl.appendChild(sevWrap);
+  (document.getElementById('ev-sev') as HTMLInputElement).addEventListener('input', (e) => {
+    evMinSev = Number((e.target as HTMLInputElement).value);
+    renderEvents();
+  });
+
+  const EV_PAGE = 400;
+  let evShown = EV_PAGE;
+  function renderEvents(keepScroll = false): void {
+    if (!keepScroll) evShown = EV_PAGE;
+    const rows = allEvents.filter(ev =>
+      ev.severity >= evMinSev && catOn[eventMeta(ev.type).cat]);
+    evList.innerHTML = '';
+    const slice = rows.slice(-evShown).reverse();
+    for (const ev of slice) {
+      const meta = eventMeta(ev.type);
+      const row = document.createElement('div');
+      row.className = `ev-row sev${ev.severity}`;
+      const fcol = ev.factions.length > 0 ? FACTION_COLORS[ev.factions[0]] ?? '#34345230' : '#34345230';
+      row.innerHTML = `<span class="yr">Y${Math.floor(ev.tick / TICKS_PER_YEAR)}</span>` +
+        `<span class="gl" style="color:${meta.color}">${meta.glyph}</span>` +
+        `<div class="fc" style="background:${fcol}"></div>` +
+        `<span class="tx">${ev.text.replace(/^Y\d+: /, '')}</span>`;
+      row.addEventListener('click', () => {
+        renderer.camera.cx = ev.x; renderer.camera.cy = ev.y;
+        if (renderer.camera.level < 2) renderer.camera.level = 2;
+        worker.postMessage({ t: 'chain', eventId: ev.id });
+      });
+      evList.appendChild(row);
+    }
+    if (rows.length > evShown) {
+      const more = document.createElement('button');
+      more.className = 'ctl';
+      more.style.cssText = 'margin:8px auto;display:block';
+      more.textContent = `⬆ ${rows.length - evShown} older events`;
+      more.addEventListener('click', () => { evShown += EV_PAGE; renderEvents(true); });
+      evList.appendChild(more);
+    }
+  }
+
+  // Councils tab: every decision, verbatim reasoning, faction filter (11 §G1)
+  function renderCouncilFilters(): void {
+    clFiltersEl.innerHTML = '';
+    const mk = (label: string, id: number, color?: string) => {
+      const chip = document.createElement('button');
+      chip.className = `fchip${clFaction === id ? ' on' : ''}`;
+      chip.textContent = label;
+      if (color) chip.style.setProperty('--fc', color);
+      chip.addEventListener('click', () => { clFaction = id; renderCouncils(); });
+      clFiltersEl.appendChild(chip);
+    };
+    mk('all', -1);
+    for (const f of latest?.factions ?? []) mk(f.name.split(' ')[0], f.id, FACTION_COLORS[f.id]);
+  }
+  function renderCouncils(): void {
+    renderCouncilFilters();
+    clList.innerHTML = '';
+    const rows = councilEntries.filter(en => clFaction < 0 || en.factionId === clFaction);
+    if (rows.length === 0) {
+      clList.innerHTML = '<div style="color:#9badb7;font-style:italic;padding:16px 6px">No decisions on record yet.</div>';
+      return;
+    }
+    for (const en of rows.slice(-160).reverse()) {
+      const row = document.createElement('div');
+      row.className = 'cl-row';
+      const llm = en.source !== 'fallback';
+      row.innerHTML =
+        `<div class="hd"><span style="color:${FACTION_COLORS[en.factionId] ?? '#9badb7'}">👑 ${en.actorName} · ${en.factionName}</span>` +
+        `<span>Y${Math.floor(en.applyAtTick / TICKS_PER_YEAR)}</span></div>` +
+        `<div class="ch">${en.choice.split('(')[0].replace(/_/g, ' ').toLowerCase()}</div>` +
+        (en.reasoning ? `<div class="rs">“${en.reasoning}”</div>` : '') +
+        `<div class="hd"><span class="${llm ? 'src-llm' : ''}">${llm ? 'spoken by the king' : 'ruled by instinct'}</span></div>`;
+      clList.appendChild(row);
+    }
+  }
+
+  // catch-up digest (11 §G3): after a time jump > 5 years, "previously on"
+  const digestCard = document.getElementById('digest-card')!;
+  let seekFromYear = -1;
+  function showDigest(fromYear: number, toYear: number): void {
+    const lo = Math.min(fromYear, toYear), hi = Math.max(fromYear, toYear);
+    const span = majors.filter(ev => {
+      const y = ev.tick / TICKS_PER_YEAR;
+      return y > lo && y <= hi;
+    }).sort((a, b) => b.severity - a.severity).slice(0, 4);
+    if (span.length === 0) return;
+    digestCard.innerHTML = `<h4>Meanwhile, ${hi - lo} years pass…</h4>` +
+      `<span style="float:right;cursor:pointer;color:#9badb7;position:absolute;top:10px;right:12px" id="digest-close">✕</span>`;
+    for (const ev of span) {
+      const row = document.createElement('div');
+      row.className = 'dg-row';
+      const meta = eventMeta(ev.type);
+      row.innerHTML = `<span style="color:${meta.color}">${meta.glyph}</span> ${ev.text.replace(/^Y\d+: /, `Y${Math.floor(ev.tick / TICKS_PER_YEAR)}: `)}`;
+      row.addEventListener('click', () => {
+        renderer.camera.cx = ev.x; renderer.camera.cy = ev.y;
+        worker.postMessage({ t: 'chain', eventId: ev.id });
+        digestCard.style.display = 'none';
+      });
+      digestCard.appendChild(row);
+    }
+    digestCard.style.display = 'block';
+    document.getElementById('digest-close')!.addEventListener('click', () => {
+      digestCard.style.display = 'none';
+    });
+    setTimeout(() => { digestCard.style.display = 'none'; }, 16000);
   }
 
   document.getElementById('btn-chron-export')!.addEventListener('click', exportBook);
@@ -755,18 +962,33 @@ ${parts.join('\n')}</body>`;
     const key = events.map(ev => ev.id).join(',');
     if (key === feedIds) return;
     feedIds = key;
-    feed.innerHTML = '';
-    for (const ev of events.slice(-8).reverse()) {
-      const span = document.createElement('span');
-      span.className = `ev sev${ev.severity}`;
-      span.textContent = ev.text;
-      span.addEventListener('click', () => {
-        renderer.camera.cx = ev.x; renderer.camera.cy = ev.y;
-        if (renderer.camera.level < 2) renderer.camera.level = 2;
-        worker.postMessage({ t: 'chain', eventId: ev.id });
-      });
-      feed.appendChild(span);
+    // unread badge: new events land silently in the Events tab (11 §G3)
+    const maxId = events.length > 0 ? events[events.length - 1].id : -1;
+    if (lastSeenEventId >= 0) {
+      const fresh = events.filter(ev => ev.id > lastSeenEventId).length;
+      if (fresh > 0) {
+        if (activeTab === 'events' && rail.classList.contains('open')) {
+          if (performance.now() - lastEventsRequest > 3000) {
+            worker.postMessage({ t: 'allEvents', minSeverity: 2 });
+            lastEventsRequest = performance.now();
+          }
+        } else {
+          evUnread += fresh;
+          updateBadges();
+        }
+      }
     }
+    lastSeenEventId = Math.max(lastSeenEventId, maxId);
+    // bottom ticker shrinks to ONE latest line acting as an Events-tab button (11 §G1)
+    feed.innerHTML = '';
+    const ev = events[events.length - 1];
+    if (!ev) return;
+    const meta = eventMeta((ev as any).type ?? 0);
+    const span = document.createElement('span');
+    span.className = `ev sev${ev.severity}`;
+    span.innerHTML = `<span style="color:${meta.color}">${meta.glyph}</span> Y${Math.floor(ev.tick / TICKS_PER_YEAR)}: ${ev.text.replace(/^Y\d+: /, '')} <span style="color:#639bff;margin-left:8px">‣ all events</span>`;
+    span.addEventListener('click', () => openRail('events'));
+    feed.appendChild(span);
   }
 
   interface ChainNode { id: number; tick: number; severity: number; x: number; y: number; text: string }

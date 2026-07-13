@@ -33,9 +33,48 @@
     #inspector .offer { display: flex; justify-content: space-between; color: var(--dim); font-size: 12px; }
     #inspector .close { float: right; cursor: pointer; color: var(--dim); }
     #chronicle-rail { grid-area: chronicle; width: 0; background: var(--panel);
-      border-left: 1px solid var(--border); overflow-y: auto; transition: width .2s;
-      font-size: 14px; }
-    #chronicle-rail.open { width: 360px; padding: 12px; }
+      border-left: 1px solid var(--border); overflow: hidden; transition: width .2s;
+      font-size: 14px; display: flex; flex-direction: column; }
+    #chronicle-rail.open { width: 380px; padding: 12px; }
+    /* reading mode (G4): pause + open panel = wide rail, dimmed world */
+    body.reading #chronicle-rail.open { width: 500px; }
+    body.reading #world { filter: brightness(0.6); }
+    #rail-tabs { display: none; gap: 4px; margin-bottom: 10px; flex-shrink: 0; }
+    #chronicle-rail.open #rail-tabs { display: flex; }
+    .rtab { background: var(--panel2); color: var(--dim); border: 1px solid var(--border);
+      border-radius: 5px; padding: 5px 10px; cursor: pointer; font-size: 13px; position: relative; }
+    .rtab.active { background: var(--accent); color: #14141f; }
+    .rtab .badge { background: var(--warn); color: #fff; font-size: 10px; border-radius: 8px;
+      padding: 0 5px; margin-left: 4px; display: none; }
+    .rail-tab { flex: 1; overflow-y: auto; min-height: 0; }
+    /* Events tab (G1) */
+    #ev-filters { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 8px; align-items: center; }
+    .fchip { background: var(--panel2); color: var(--dim); border: 1px solid var(--border);
+      border-radius: 10px; padding: 2px 9px; cursor: pointer; font-size: 12px; }
+    .fchip.on { color: var(--text); border-color: var(--fc, var(--accent)); background: #23233a; }
+    .ev-row { display: flex; gap: 7px; padding: 5px 4px; cursor: pointer; border-radius: 4px;
+      font-size: 13px; line-height: 1.4; align-items: baseline; }
+    .ev-row:hover { background: var(--panel2); }
+    .ev-row .yr { color: var(--dim); font-size: 11px; min-width: 42px; text-align: right;
+      font-variant-numeric: tabular-nums; flex-shrink: 0; }
+    .ev-row .gl { flex-shrink: 0; width: 18px; text-align: center; }
+    .ev-row .fc { width: 3px; align-self: stretch; border-radius: 2px; flex-shrink: 0; }
+    .ev-row .tx { flex: 1; overflow-wrap: anywhere; }
+    .ev-row.sev4 .tx { color: var(--text); } .ev-row.sev5 .tx { color: var(--warn); font-weight: 600; }
+    .ev-row .tx { color: var(--dim); }
+    /* Councils tab */
+    .cl-row { padding: 8px 6px; border-bottom: 1px solid var(--border); font-size: 13px; }
+    .cl-row .hd { display: flex; justify-content: space-between; color: var(--dim); font-size: 11px; }
+    .cl-row .ch { margin: 3px 0; }
+    .cl-row .rs { color: var(--dim); font-style: italic; line-height: 1.45; }
+    .cl-row .src-llm { color: var(--accent); }
+    /* catch-up digest (G3) */
+    #digest-card { position: absolute; top: 70px; left: 50%; transform: translateX(-50%);
+      background: #16161ff5; border: 1px solid var(--accent); border-radius: 10px;
+      padding: 14px 18px; max-width: 440px; z-index: 35; display: none; }
+    #digest-card h4 { font-weight: 500; margin-bottom: 8px; }
+    #digest-card .dg-row { padding: 4px 0; cursor: pointer; color: var(--dim); font-size: 13px; }
+    #digest-card .dg-row:hover { color: var(--text); }
     #chron-head { display: flex; align-items: center; justify-content: space-between;
       margin-bottom: 10px; gap: 8px; }
     #chron-lag { color: var(--dim); font-size: 11px; font-style: italic; }
@@ -196,6 +235,7 @@
       <canvas id="minimap" width="140" height="140"></canvas>
       <div id="hint" style="display:none"></div>
       <div id="council-panel" style="display:none"></div>
+      <div id="digest-card"></div>
       <div id="toast-stack"></div>
       <div id="chain-view">
         <h5>WHY THIS HAPPENED <span style="float:right;cursor:pointer" id="chain-close">✕</span></h5>
@@ -203,16 +243,32 @@
       </div>
     </div>
     <div id="chronicle-rail">
-      <div id="chron-head">
-        <span>📖 The Chronicle</span>
-        <span id="chron-lag"></span>
-        <button class="ctl" id="btn-chron-font" title="font size">A±</button>
-        <button class="ctl" id="btn-chron-export" title="export the history book">⬇ book</button>
+      <div id="rail-tabs">
+        <button class="rtab active" data-tab="chronicle">📖 Chronicle</button>
+        <button class="rtab" data-tab="events">Events<span class="badge" id="badge-events"></span></button>
+        <button class="rtab" data-tab="councils">Councils<span class="badge" id="badge-councils"></span></button>
+        <button class="rtab" data-tab="stats">Stats</button>
       </div>
-      <div id="chron-toc"></div>
-      <div id="chron-body"></div>
+      <div id="tab-chronicle" class="rail-tab">
+        <div id="chron-head">
+          <span id="chron-lag"></span>
+          <button class="ctl" id="btn-chron-font" title="font size">A±</button>
+          <button class="ctl" id="btn-chron-export" title="export the history book">⬇ book</button>
+        </div>
+        <div id="chron-toc"></div>
+        <div id="chron-body"></div>
+      </div>
+      <div id="tab-events" class="rail-tab" style="display:none">
+        <div id="ev-filters"></div>
+        <div id="ev-list"></div>
+      </div>
+      <div id="tab-councils" class="rail-tab" style="display:none">
+        <div id="cl-filters"></div>
+        <div id="cl-list"></div>
+      </div>
+      <div id="tab-stats" class="rail-tab" style="display:none"></div>
     </div>
-    <div id="event-feed"></div>
+    <div id="event-feed" title="open the full event log"></div>
     <div id="timeline-bar">
       <button class="ctl" id="btn-pause">⏸</button>
       <button class="ctl speed" data-s="1" title="kings think deeply">1×</button>
