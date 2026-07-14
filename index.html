@@ -224,7 +224,11 @@
     /* landing overlay */
     #landing { position: fixed; inset: 0; background: var(--bg); z-index: 50;
       display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; }
-    #landing h1 { font-size: 42px; letter-spacing: 8px; color: var(--text); font-weight: 300; }
+    #landing h1 { font-size: 42px; letter-spacing: 8px; font-weight: 300;
+      background: linear-gradient(100deg, #cbdbfc 20%, #fbf236 40%, #cbdbfc 60%);
+      background-size: 200% 100%; -webkit-background-clip: text; background-clip: text;
+      color: transparent; animation: titleShimmer 6s linear infinite; }
+    @keyframes titleShimmer { 0% { background-position: 180% 0; } 100% { background-position: -20% 0; } }
     #landing .sub { color: var(--dim); margin-bottom: 20px; }
     #landing .row { display: flex; gap: 10px; align-items: center; }
     #landing input { background: var(--panel); border: 1px solid var(--border); color: var(--text);
@@ -232,7 +236,15 @@
     #landing button { font-size: 15px; padding: 8px 18px; }
     #llm-status { color: var(--dim); font-size: 13px; margin-top: 10px; }
     #gen-preview { width: 256px; height: 256px; image-rendering: pixelated;
-      border: 1px solid var(--border); border-radius: 6px; display: none; }
+      border: 2px solid #8a6f30; border-radius: 8px; display: none;
+      box-shadow: 0 0 0 1px #45283c, 0 6px 24px #000a; }
+    #world-laws { background: var(--panel); border: 1px solid var(--border);
+      border-radius: 8px; padding: 10px 16px; }
+    #minimap { border: 2px solid #8a6f30 !important; box-shadow: 0 0 0 1px #45283c, inset 0 0 18px #0008; }
+    #chron-body p { font-family: Georgia, 'Times New Roman', serif; color: #d8cfc0; }
+    #chron-body h4 { font-family: Georgia, serif; color: #eec39a; letter-spacing: 0.5px; }
+    #chron-toc .era-h { font-variant: small-caps; }
+    #tab-chronicle { background: linear-gradient(#1c1c2b, #1e1a16); border-radius: 6px; padding: 4px 6px; }
   </style>
 </head>
 <body>

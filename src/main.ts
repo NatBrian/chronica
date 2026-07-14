@@ -80,8 +80,43 @@ function bootApp(): void {
       });
     });
 
+  // live seed preview (doc 13 V6): the typed seed renders its island
+  const genPreview = document.getElementById('gen-preview') as HTMLCanvasElement;
+  genPreview.style.display = 'block';
+  let previewTimer = 0;
+  const renderPreview = () => {
+    const seed = Number(seedInput.value) | 0;
+    import('./sim/world/worldgen').then(({ generateWorld }) => {
+      import('./shared/types').then(({ defaultConfig }) => {
+        const gen = generateWorld(seed, { ...defaultConfig(), mapSize: 128 });
+        const pctx = genPreview.getContext('2d')!;
+        pctx.imageSmoothingEnabled = false;
+        const img = pctx.createImageData(128, 128);
+        for (let y = 0; y < 128; y++) {
+          for (let x = 0; x < 128; x++) {
+            const [r, g, b] = tileColor(gen.map as any, y * 128 + x, x, y);
+            const o = (y * 128 + x) * 4;
+            img.data[o] = r; img.data[o + 1] = g; img.data[o + 2] = b; img.data[o + 3] = 255;
+          }
+        }
+        const tmp = document.createElement('canvas');
+        tmp.width = 128; tmp.height = 128;
+        tmp.getContext('2d')!.putImageData(img, 0, 0);
+        pctx.clearRect(0, 0, genPreview.width, genPreview.height);
+        pctx.drawImage(tmp, 0, 0, genPreview.width, genPreview.height);
+      });
+    });
+  };
+  const schedulePreview = () => {
+    clearTimeout(previewTimer);
+    previewTimer = window.setTimeout(renderPreview, 350);
+  };
+  seedInput.addEventListener('input', schedulePreview);
+  schedulePreview();
+
   document.getElementById('btn-random')!.addEventListener('click', () => {
     seedInput.value = String((Math.random() * 2 ** 31) | 0);
+    schedulePreview();
   });
   document.getElementById('btn-begin')!.addEventListener('click', () => {
     landing.style.display = 'none';
