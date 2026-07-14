@@ -17,7 +17,7 @@ import { TICKS_PER_YEAR, Journal, DecisionRequest, DecisionResult, JournalEntry 
 import { SaveStore, IdbBackend, SaveRecord } from './shared/saveStore';
 import { Brain } from './brain/brain';
 import { OllamaBrain } from './brain/ollamaBrain';
-import { ByoKeyBrain, loadByoConfig, saveByoConfig } from './brain/byoKeyBrain';
+import { ByoKeyBrain, loadByoConfig, saveByoConfig, ByoConfig } from './brain/byoKeyBrain';
 import { BrainQueue } from './brain/queue';
 
 const atlas: PawnAtlas = bakePawnAtlas();
@@ -58,27 +58,102 @@ function bootApp(): void {
   const landing = document.getElementById('landing')!;
   const seedInput = document.getElementById('seed-input') as HTMLInputElement;
   const llmStatus = document.getElementById('llm-status')!;
+  const ollamaUrlInput = document.getElementById('ollama-url') as HTMLInputElement;
 
-  fetch('http://localhost:11434/api/tags', { signal: AbortSignal.timeout(1500) })
-    .then(r => r.json())
-    .then(() => { llmStatus.textContent = '✓ Local LLM found: kings will think.'; })
-    .catch(() => {
-      const hasKey = !!loadByoConfig();
-      llmStatus.innerHTML = hasKey
-        ? '✓ API key set: kings will think (BYO key).'
-        : 'No local LLM: kings will rule by instinct. (ollama + OLLAMA_ORIGINS=* enables thinking kings, or <a href="#" id="byok-link" style="color:#639bff">use an API key</a>)';
-      document.getElementById('byok-link')?.addEventListener('click', (e) => {
-        e.preventDefault();
-        const provider = (prompt('Provider: "openrouter" or "anthropic"?', 'openrouter') ?? '').trim() as 'openrouter' | 'anthropic';
-        if (provider !== 'openrouter' && provider !== 'anthropic') return;
-        const apiKey = (prompt('API key (stored in your browser only):') ?? '').trim();
-        if (!apiKey) return;
-        const model = (prompt('Model id:', provider === 'anthropic' ? 'claude-haiku-4-5-20251001' : 'meta-llama/llama-3.3-70b-instruct') ?? '').trim();
-        if (!model) return;
-        saveByoConfig({ provider, apiKey, model });
-        llmStatus.textContent = '✓ API key saved: kings will think (BYO key).';
+  const savedOllamaUrl = localStorage.getItem('chronica.ollamaUrl');
+  if (savedOllamaUrl) ollamaUrlInput.value = savedOllamaUrl;
+
+  // ---- BYOK form ----
+  const byokProvider = document.getElementById('byok-provider') as HTMLSelectElement;
+  const byokKey = document.getElementById('byok-key') as HTMLInputElement;
+  const byokUrl = document.getElementById('byok-url') as HTMLInputElement;
+  const byokUrlLabel = document.getElementById('byok-url-label')!;
+  const byokModel = document.getElementById('byok-model') as HTMLInputElement;
+  const byokStatus = document.getElementById('byok-status')!;
+
+  const MODEL_DEFAULTS: Record<string, string> = {
+    openrouter: 'meta-llama/llama-3.3-70b-instruct',
+    anthropic: 'claude-haiku-4-5-20251001',
+    openai: 'gpt-4o-mini',
+  };
+
+  function applyByoConfig(cfg: ByoConfig | null): void {
+    if (cfg) {
+      byokProvider.value = cfg.provider;
+      byokKey.value = cfg.apiKey;
+      byokModel.value = cfg.model;
+      if (cfg.baseUrl) byokUrl.value = cfg.baseUrl;
+      byokStatus.textContent = '✓ saved';
+    } else {
+      byokKey.value = '';
+      byokUrl.value = '';
+      byokModel.value = MODEL_DEFAULTS[byokProvider.value];
+      byokStatus.textContent = '';
+    }
+    toggleByokUrlField();
+  }
+
+  function toggleByokUrlField(): void {
+    const show = byokProvider.value === 'openai';
+    byokUrl.style.display = show ? '' : 'none';
+    byokUrlLabel.style.display = show ? '' : 'none';
+  }
+
+  byokProvider.addEventListener('change', () => {
+    if (!byokModel.value || byokStatus.textContent === '✓ saved') {
+      byokModel.value = MODEL_DEFAULTS[byokProvider.value];
+    }
+    toggleByokUrlField();
+  });
+
+  document.getElementById('btn-byok-save')!.addEventListener('click', () => {
+    const provider = byokProvider.value as 'openrouter' | 'anthropic' | 'openai';
+    const apiKey = byokKey.value.trim();
+    if (!apiKey) { byokStatus.textContent = '✗ API key required'; return; }
+    const model = byokModel.value.trim();
+    if (!model) { byokStatus.textContent = '✗ model required'; return; }
+    let baseUrl: string | undefined;
+    if (provider === 'openai') {
+      baseUrl = byokUrl.value.trim() || undefined;
+    }
+    saveByoConfig({ provider, apiKey, model, ...(baseUrl ? { baseUrl } : {}) });
+    byokStatus.textContent = '✓ saved';
+    llmStatus.textContent = '✓ API key set: kings will think (BYO key).';
+  });
+
+  document.getElementById('btn-byok-clear')!.addEventListener('click', () => {
+    saveByoConfig(null);
+    applyByoConfig(null);
+    llmStatus.textContent = 'API key cleared.';
+  });
+
+  applyByoConfig(loadByoConfig());
+
+  function probeOllama(url: string): void {
+    fetch(`${url}/api/tags`, { signal: AbortSignal.timeout(1500) })
+      .then(r => r.json())
+      .then(() => { llmStatus.textContent = '✓ Local LLM found: kings will think.'; })
+      .catch(() => {
+        const hasKey = !!loadByoConfig();
+        llmStatus.textContent = hasKey
+          ? '✓ API key set: kings will think (BYO key).'
+          : 'No local LLM: kings will rule by instinct. (ollama + OLLAMA_ORIGINS=* enables thinking kings)';
       });
-    });
+  }
+
+  document.getElementById('btn-ollama-save')!.addEventListener('click', () => {
+    const url = ollamaUrlInput.value.trim();
+    if (!url) {
+      localStorage.removeItem('chronica.ollamaUrl');
+      llmStatus.textContent = 'Ollama URL cleared. Re-checking...';
+    } else {
+      localStorage.setItem('chronica.ollamaUrl', url);
+      llmStatus.textContent = 'Checking...';
+    }
+    probeOllama(url || 'http://localhost:11434');
+  });
+
+  probeOllama(savedOllamaUrl || 'http://localhost:11434');
 
   // live seed preview (doc 13 V6): the typed seed renders its island
   const genPreview = document.getElementById('gen-preview') as HTMLCanvasElement;
@@ -200,7 +275,8 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
   let brainQueue: BrainQueue | null = null;
   (async () => {
     let brain: Brain | null = null;
-    const ollama = new OllamaBrain();
+    const ollamaUrl = localStorage.getItem('chronica.ollamaUrl') || undefined;
+    const ollama = new OllamaBrain(ollamaUrl);
     if (await ollama.detectModel()) {
       brain = ollama;
     } else {
@@ -461,13 +537,16 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
 
   // ---- mouse: drag pan + wheel zoom + click-to-inspect ----
   let dragging = false; let lastX = 0; let lastY = 0; let downX = 0; let downY = 0;
+  let touchHandled = false; let touchHandledAt = 0;
   canvas.addEventListener('mousedown', (e) => {
+    if (touchHandled && performance.now() - touchHandledAt < 500) return;
     dragging = true; lastX = downX = e.clientX; lastY = downY = e.clientY;
     flyTarget = null;                       // manual camera cancels auto-pan
     followId = -1;                          // and releases any followed star
     canvas.classList.add('dragging');
   });
   window.addEventListener('mouseup', (e) => {
+    if (touchHandled && performance.now() - touchHandledAt < 500) { touchHandled = false; return; }
     if (dragging && Math.abs(e.clientX - downX) < 4 && Math.abs(e.clientY - downY) < 4) {
       const rect = canvas.getBoundingClientRect();
       const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
@@ -488,6 +567,7 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
     dragging = false; canvas.classList.remove('dragging');
   });
   window.addEventListener('mousemove', (e) => {
+    if (touchHandled && performance.now() - touchHandledAt < 500) return;
     if (!dragging) return;
     renderer.camera.pan(e.clientX - lastX, e.clientY - lastY);
     lastX = e.clientX; lastY = e.clientY;
@@ -498,6 +578,73 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
     renderer.camera.zoomStep(e.deltaY < 0 ? 1 : -1, e.clientX - rect.left, e.clientY - rect.top);
   }, { passive: false });
   window.addEventListener('resize', () => { renderer.resize(); sizeTimeline(); });
+
+  // ---- touch: drag pan, tap-to-inspect, pinch zoom (mobile) ----
+  let touchStartTime = 0; let pinchDist = 0;
+  canvas.addEventListener('touchstart', (e) => {
+    if (e.touches.length === 1) {
+      const t = e.touches[0];
+      touchStartTime = performance.now();
+      downX = t.clientX; downY = t.clientY;
+      lastX = t.clientX; lastY = t.clientY;
+      dragging = true;
+      flyTarget = null;
+      followId = -1;
+      canvas.classList.add('dragging');
+    } else if (e.touches.length === 2) {
+      pinchDist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+    }
+  }, { passive: false });
+  canvas.addEventListener('touchmove', (e) => {
+    e.preventDefault();
+    if (e.touches.length === 2) {
+      const dist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      if (Math.abs(dist - pinchDist) > 20) {
+        const rect = canvas.getBoundingClientRect();
+        const cx = (e.touches[0].clientX + e.touches[1].clientX) / 2 - rect.left;
+        const cy = (e.touches[0].clientY + e.touches[1].clientY) / 2 - rect.top;
+        renderer.camera.zoomStep(dist > pinchDist ? 1 : -1, cx, cy);
+        pinchDist = dist;
+      }
+    } else if (e.touches.length === 1 && dragging) {
+      const t = e.touches[0];
+      renderer.camera.pan(t.clientX - lastX, t.clientY - lastY);
+      lastX = t.clientX; lastY = t.clientY;
+    }
+  }, { passive: false });
+  canvas.addEventListener('touchend', (e) => {
+    dragging = false;
+    canvas.classList.remove('dragging');
+    const dt = performance.now() - touchStartTime;
+    if (e.changedTouches.length === 1) {
+      const t = e.changedTouches[0];
+      if (dt < 300 && Math.abs(t.clientX - downX) < 8 && Math.abs(t.clientY - downY) < 8) {
+        const rect = canvas.getBoundingClientRect();
+        const sx = t.clientX - rect.left, sy = t.clientY - rect.top;
+        const hit = beacons.hitTest(sx, sy, renderer.camera);
+        if (hit) {
+          if (hit.ev) {
+            flyTarget = { x: hit.ev.x, y: hit.ev.y };
+            worker.postMessage({ t: 'chain', eventId: hit.ev.id });
+          } else {
+            openRail('events');
+          }
+        } else {
+          const [wx, wy] = renderer.camera.screenToWorld(sx, sy);
+          worker.postMessage({ t: 'inspect', x: Math.round(wx), y: Math.round(wy) });
+        }
+      }
+    }
+    touchHandled = true;
+    touchHandledAt = performance.now();
+    setTimeout(() => { touchHandled = false; }, 500);
+  }, { passive: true });
 
   // ---- timeline v2 (11 §G2): era bands, category markers, two-stage zoom ----
   const tl = document.getElementById('timeline') as HTMLCanvasElement;
@@ -631,6 +778,17 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
     legendPop.style.display = legendPop.style.display === 'none' ? 'block' : 'none';
   });
 
+  tl.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    const rect = tl.getBoundingClientRect();
+    const t = e.touches[0];
+    const year = xToYear(t.clientX - rect.left, rect.width);
+    if (t.clientY - rect.top < ERA_H && !tlZoom) {
+      const era = eraAt(year);
+      if (era) { tlZoom = { y0: era.yearStart, y1: era.yearEnd }; tlExit.style.display = 'inline-block'; return; }
+    }
+    doSeek(year);
+  }, { passive: false });
   tl.addEventListener('click', (e) => {
     const rect = tl.getBoundingClientRect();
     const year = xToYear(e.clientX - rect.left, rect.width);

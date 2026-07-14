@@ -4,9 +4,10 @@ import { DecisionRequest, DecisionResult } from '../shared/types';
 import { Brain, decisionPrompt, validateResult } from './brain';
 
 export interface ByoConfig {
-  provider: 'openrouter' | 'anthropic';
+  provider: 'openrouter' | 'anthropic' | 'openai';
   apiKey: string;
   model: string;
+  baseUrl?: string;
 }
 
 export function loadByoConfig(): ByoConfig | null {
@@ -71,25 +72,29 @@ export class ByoKeyBrain implements Brain {
       const data = await r.json() as { content?: { text?: string }[] };
       return data.content?.[0]?.text ?? '';
     }
-    // openrouter (openai-compatible)
-    const r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    const openaiBody = {
+      model: this.cfg.model,
+      max_tokens: maxTokens,
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: user },
+      ],
+      temperature: 0.7,
+    };
+    const chatUrl = this.cfg.provider === 'openai'
+      ? `${this.cfg.baseUrl ?? 'https://api.openai.com/v1'}/chat/completions`
+      : 'https://openrouter.ai/api/v1/chat/completions';
+    const label = this.cfg.provider === 'openai' ? 'openai' : 'openrouter';
+    const r = await fetch(chatUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${this.cfg.apiKey}`,
       },
-      body: JSON.stringify({
-        model: this.cfg.model,
-        max_tokens: maxTokens,
-        messages: [
-          { role: 'system', content: system },
-          { role: 'user', content: user },
-        ],
-        temperature: 0.7,
-      }),
+      body: JSON.stringify(openaiBody),
       signal: AbortSignal.timeout(30_000),
     });
-    if (!r.ok) throw new Error(`openrouter ${r.status}`);
+    if (!r.ok) throw new Error(`${label} ${r.status}`);
     const data = await r.json() as { choices?: { message?: { content?: string } }[] };
     return data.choices?.[0]?.message?.content ?? '';
   }

@@ -245,6 +245,62 @@
     #chron-body h4 { font-family: Georgia, serif; color: #eec39a; letter-spacing: 0.5px; }
     #chron-toc .era-h { font-variant: small-caps; }
     #tab-chronicle { background: linear-gradient(#1c1c2b, #1e1a16); border-radius: 6px; padding: 4px 6px; }
+    /* mobile portrait (max 768px) */
+    @media (pointer: coarse) {
+      button.ctl { padding: 8px 14px; min-height: 44px; font-size: 15px; }
+      .rtab { padding: 8px 14px; min-height: 44px; }
+      .fhud { padding: 6px 10px; min-height: 36px; }
+      .ev-row { padding: 8px 6px; min-height: 36px; }
+      .fchip { padding: 6px 12px; min-height: 36px; }
+      #chron-body p { padding: 8px 8px; }
+      .war-row { padding: 8px 12px; }
+      #search-input { font-size: 18px; padding: 14px 16px; }
+      #inspector .close { font-size: 18px; padding: 4px; }
+    }
+    @media (max-width: 768px) {
+      #app { grid-template-columns: 1fr; grid-template-rows: 1fr auto auto; grid-template-areas: "world" "feed" "timeline"; }
+      #world-wrap { touch-action: none; }
+      #timeline-bar { touch-action: none; gap: 6px; padding: 6px 6px; flex-wrap: wrap; }
+      #chronicle-rail:not(.open) { display: none; }
+      #chronicle-rail.open { position: fixed; inset: 0; width: 100%; z-index: 50; border-left: none; border-radius: 0; padding: 8px; }
+      body.reading #chronicle-rail.open { width: 100%; }
+      #hud-factions { max-width: 92vw; font-size: 11px; top: 6px; gap: 4px; }
+      #hud-factions .fhud canvas { display: none; }
+      #hud { top: 6px; left: 6px; padding: 4px 8px; font-size: 12px; }
+      #war-strip { min-width: unset; width: 94vw; top: 40px; }
+      .war-row { min-width: unset; font-size: 11px; }
+      #inspector { right: 4px; left: 4px; width: auto; top: 6px; max-height: 70%; }
+      #overlay-bar { bottom: 130px; left: 4px; gap: 3px; }
+      #overlay-legend { bottom: 166px; left: 4px; max-width: 200px; font-size: 11px; }
+      #minimap { width: 100px; height: 100px; bottom: 8px; left: 6px; }
+      #char-sheet { width: 94vw; max-height: 70%; }
+      #council-panel { width: 94vw; max-height: 70%; }
+      #digest-card { max-width: 92vw; top: 60px; }
+      #chain-view { max-width: 96vw; padding: 8px 10px; }
+      #chain-nodes { gap: 4px; }
+      .chain-node { max-width: 140px; font-size: 11px; padding: 4px 8px; }
+      #timeline-bar button.ctl { font-size: 13px; padding: 6px 10px; min-height: 36px; }
+      #year-label { min-width: 60px; font-size: 12px; }
+      #replay-badge { font-size: 10px; padding: 1px 6px; }
+      #toast-stack { bottom: 50px; right: 6px; }
+      .toast { max-width: 240px; font-size: 12px; padding: 6px 10px; }
+      #search-box { width: 94vw; }
+      #landing h1 { font-size: 28px; letter-spacing: 4px; }
+      #landing input { width: 100px; font-size: 14px; }
+      #gen-preview { width: 160px; height: 160px; }
+      #world-laws { font-size: 12px; }
+      #world-laws div[style*="grid"] { gap: 4px 8px; }
+      #hint { font-size: 12px; max-width: 90vw; top: 80px; padding: 8px 12px; }
+      #seek-status { bottom: 80px; font-size: 12px; padding: 4px 12px; }
+      #postcard-caption { font-size: 14px; bottom: 16px; }
+      body.postcard #app { grid-template-rows: 1fr 0; grid-template-columns: 1fr; }
+      #tab-notice { font-size: 15px; padding: 20px; text-align: center; }
+      #ev-filters { gap: 3px; }
+      #ev-filters .fchip { font-size: 11px; padding: 4px 8px; min-height: 30px; }
+      #chron-body { font-size: 13px; }
+      #chron-body h4 { font-size: 15px; }
+      #chron-body p { font-size: 13px; }
+    }
   </style>
 </head>
 <body>
@@ -257,6 +313,11 @@
       <button class="ctl" id="btn-random">Random</button>
       <button class="ctl" id="btn-begin">Begin History</button>
     </div>
+    <div class="row" style="margin-top:4px;gap:6px">
+      <span style="color:#9badb7;font-size:12px">ollama</span>
+      <input id="ollama-url" type="text" placeholder="http://localhost:11434" style="width:180px;font-size:13px" />
+      <button class="ctl" id="btn-ollama-save" style="font-size:12px">Save</button>
+    </div>
     <div id="llm-status">Checking for local kings...</div>
     <details id="world-laws" style="color:#9badb7;font-size:13px;margin-top:6px">
       <summary style="cursor:pointer">⚖ world laws (set once, at creation)</summary>
@@ -267,6 +328,28 @@
         <label>disasters</label><select id="law-disaster" class="ctl"><option value="50">gentle</option><option value="100" selected>classic</option><option value="200">harsh</option></select>
         <label>monsters &amp; plagues</label><select id="law-injectors" class="ctl"><option value="1" selected>on</option><option value="0">off</option></select>
         <label>turning ages</label><select id="law-erawheel" class="ctl"><option value="1" selected>on</option><option value="0">off</option></select>
+      </div>
+    </details>
+    <details id="byok-config" style="color:#9badb7;font-size:13px;margin-top:4px">
+      <summary style="cursor:pointer">🔑 API key (thinking kings without ollama)</summary>
+      <div style="display:grid;grid-template-columns:auto 1fr;gap:6px 10px;margin-top:8px;align-items:center;text-align:left">
+        <label>Provider</label>
+        <select id="byok-provider" class="ctl">
+          <option value="openrouter">OpenRouter</option>
+          <option value="anthropic">Anthropic</option>
+          <option value="openai">OpenAI compatible</option>
+        </select>
+        <label>API key</label>
+        <input id="byok-key" type="password" style="width:100%;padding:4px 8px;background:var(--panel);border:1px solid var(--border);color:var(--text);border-radius:4px" />
+        <label id="byok-url-label">Base URL</label>
+        <input id="byok-url" type="text" placeholder="https://api.openai.com/v1" style="width:100%;padding:4px 8px;background:var(--panel);border:1px solid var(--border);color:var(--text);border-radius:4px" />
+        <label>Model</label>
+        <input id="byok-model" type="text" style="width:100%;padding:4px 8px;background:var(--panel);border:1px solid var(--border);color:var(--text);border-radius:4px" />
+      </div>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button class="ctl" id="btn-byok-save" style="font-size:12px">Save</button>
+        <button class="ctl" id="btn-byok-clear" style="font-size:12px">Clear</button>
+        <span id="byok-status" style="font-size:12px;align-self:center"></span>
       </div>
     </details>
     <div id="resume-list"></div>

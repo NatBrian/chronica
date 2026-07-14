@@ -1,17 +1,22 @@
-// OllamaBrain: direct browser → localhost:11434 (05 §Backend).
+// OllamaBrain: direct browser → localhost:11434 by default (05 §Backend).
 // Grammar-constrained JSON via `format`: invalid output structurally impossible.
 import { DecisionRequest, DecisionResult } from '../shared/types';
 import { Brain, decisionPrompt, validateResult } from './brain';
 
-const BASE = 'http://localhost:11434';
+const DEFAULT_BASE = 'http://localhost:11434';
 
 export class OllamaBrain implements Brain {
   readonly name = 'ollama';
   model: string | null = null;
+  baseUrl: string;
+
+  constructor(baseUrl?: string) {
+    this.baseUrl = baseUrl ?? DEFAULT_BASE;
+  }
 
   async detectModel(): Promise<string | null> {
     try {
-      const r = await fetch(`${BASE}/api/tags`, { signal: AbortSignal.timeout(2500) });
+      const r = await fetch(`${this.baseUrl}/api/tags`, { signal: AbortSignal.timeout(2500) });
       const data = await r.json() as { models?: { name: string; size?: number }[] };
       const models = data.models ?? [];
       if (models.length === 0) return null;
@@ -27,7 +32,7 @@ export class OllamaBrain implements Brain {
   async probe(): Promise<number> {
     if (!this.model && !(await this.detectModel())) throw new Error('ollama unavailable');
     const t0 = performance.now();
-    const r = await fetch(`${BASE}/api/generate`, {
+    const r = await fetch(`${this.baseUrl}/api/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ model: this.model, prompt: 'Say OK', stream: false, options: { num_predict: 4 } }),
@@ -57,7 +62,7 @@ export class OllamaBrain implements Brain {
       facts: req.facts,
       respond: 'JSON: {"title": "<chapter title, max 8 words>", "paragraphs": ["...", "..."]}',
     });
-    const r = await fetch(`${BASE}/api/chat`, {
+    const r = await fetch(`${this.baseUrl}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -109,7 +114,7 @@ export class OllamaBrain implements Brain {
       options: { temperature: 0.7, num_predict: 220 },
       think: false,                         // gemma3/qwen3 thinking wastes budget
     };
-    const r = await fetch(`${BASE}/api/chat`, {
+    const r = await fetch(`${this.baseUrl}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
