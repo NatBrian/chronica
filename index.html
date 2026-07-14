@@ -70,6 +70,9 @@
     .rtab.active { background: var(--accent); color: #14141f; }
     .rtab .badge { background: var(--warn); color: #fff; font-size: 10px; border-radius: 8px;
       padding: 0 5px; margin-left: 4px; display: none; }
+    #rail-close { background: none; border: none; color: var(--dim); cursor: pointer; font-size: 16px;
+      margin-left: auto; padding: 2px 6px; border-radius: 4px; line-height: 1; }
+    #rail-close:hover { color: var(--text); background: var(--panel2); }
     .rail-tab { flex: 1; overflow-y: auto; min-height: 0; }
     /* Events tab (G1) */
     #ev-filters { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 8px; align-items: center; }
@@ -396,6 +399,7 @@
         <button class="rtab" data-tab="events">Events<span class="badge" id="badge-events"></span></button>
         <button class="rtab" data-tab="councils">Councils<span class="badge" id="badge-councils"></span></button>
         <button class="rtab" data-tab="stats">Stats</button>
+        <button id="rail-close" title="close rail">✕</button>
       </div>
       <div id="tab-chronicle" class="rail-tab">
         <div id="chron-head">

@@ -1126,6 +1126,7 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
     updateReadingMode();
   }
   railTabs.forEach(b => b.addEventListener('click', () => openRail(b.dataset.tab!)));
+  document.getElementById('rail-close')!.addEventListener('click', closeRail);
 
   function closeRail(): void {
     rail.classList.remove('open');
