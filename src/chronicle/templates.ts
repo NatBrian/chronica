@@ -64,6 +64,10 @@ export function draftTitle(draft: ChapterDraft, facts: WorldEvent[], factionName
     }
     case 'famine': return `The Hungry Years (${y})`;
     case 'succession': return `The Passing of a Crown (${y})`;
+    case 'crisis': {
+      const rebel = facts.find(f => f.text.includes('rises in revolt'));
+      return rebel ? `The Realm Breaks (${y})` : `A Crown Contested (${y})`;
+    }
     case 'ending': return `The Last Days (${y})`;
     case 'era-life': return `Life on the Island (${y})`;
     default: return `Chronicle (${y})`;

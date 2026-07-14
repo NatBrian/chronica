@@ -231,6 +231,7 @@ function snapshotMsg() {
     factions: s.factions.map(f => ({
       id: f.id, race: f.race, name: f.name, extinct: f.extinct, leaderId: f.leaderId,
       capital: f.capital,
+      clan: f.dynasty?.clan, legitimacy: f.legitimacy ?? 80,
     })),
     wars: s.wars.map(w => ({
       id: w.id, attacker: w.attacker, defender: w.defender,

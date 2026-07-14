@@ -42,6 +42,9 @@ Single audit surface for edge cases across all systems. Each entry: trigger → 
 |---|---|---|---|
 | B1 | Seed 42: dwarves (Baarforge) are knife-edge in v1: chronic famine from ~Y14 (mountain fertility), alive only via gift/relief caravans; they collapse ~Y155-180 (512 map) or ~Y45-60 (192 map) depending on the rng roll. ANY sim-behavior change (e.g. EXPAND consuming rng/option-shuffle streams) re-rolls their fate; verified by v1-vs-M8 A/B runs 2026-07-14 | Balance gates calibrated to engine sanity, not fairy endings: soak early-extinction floor Y60 -> Y40 (M8); m8-cycle gate >= 3 races at 300y. A race dying of famine IS legitimate history (00 vision); dwarf food resilience is a deferred balance quest | 12 |
 | B2 | Auto-garrison re-formed the tick its predecessor died, and stacked while one fought (pre-M8): sieges stalled forever, casualties snowballed | Garrison rally cooldown 90 ticks after a defense squad ends + in-fight garrisons count as present; sieges progress between defender waves (P1.5, test/m8-cycle.test.ts) | 04/12 |
+| B3 | Faction ids grew past MAX_FACTIONS when splits outlived extinctions: pairKey indexed out of bounds and crashed the tick (found by M9 sweep) | Rebellion-born factions REUSE an extinct id (claimFactionSlot): pair rows wiped to Neutral, stale vassalOf pointers cleared; ids never exceed 8 (test/m9-politics.test.ts 500y invariant) | 04/12 |
+| B4 | A settlement seceding mid-war left its pawns inside the parent's marching squads: mixed-faction armies | splitFaction deserts them home: seceded members leave parent squads (empty squads disband); 500y test asserts squads never carry foreign members | 04/12 |
+| B5 | Test-side popCache faking is overwritten by the periodic stats refresh within ~300 ticks | Engineer tests with naturally mature settlements (or move real pawns); never assert on faked popCache | 12 |
 
 ## Registry rules
 

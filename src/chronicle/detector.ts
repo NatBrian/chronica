@@ -4,7 +4,7 @@ import { EventType, WorldEvent, TICKS_PER_YEAR } from '../shared/types';
 
 export interface ChapterDraft {
   id: number;
-  kind: 'war' | 'famine' | 'succession' | 'founding' | 'disaster' | 'era-life' | 'ending';
+  kind: 'war' | 'famine' | 'succession' | 'founding' | 'disaster' | 'era-life' | 'ending' | 'crisis';
   titleHint: string;
   factIds: number[];
   yearStart: number;
@@ -74,6 +74,26 @@ export function detectChapters(
     if (heir && !consumed.has(heir.id)) facts.unshift(heir);
     facts.forEach(e => consumed.add(e.id));
     drafts.push(mkDraft(chapterId++, 'succession', 'succession', facts));
+  }
+
+  // ---- rebellion / succession-crisis arcs (M9): the realm breaks ----
+  for (const split of pending) {
+    if (consumed.has(split.id)) continue;
+    if (split.type !== EventType.FactionSplit && split.type !== EventType.Rebellion) continue;
+    const context = pending.filter(c =>
+      !consumed.has(c.id) && c.id < split.id &&
+      (c.type === EventType.Succession || c.type === EventType.Coronation ||
+       c.type === EventType.CharacterDied) &&
+      c.factions.some(f => split.factions.includes(f)) &&
+      split.tick - c.tick < 3 * TICKS_PER_YEAR).slice(-4);
+    const crown = pending.find(c =>
+      !consumed.has(c.id) && c.id > split.id &&
+      c.type === EventType.Coronation &&
+      c.tick - split.tick < 2 * TICKS_PER_YEAR &&
+      c.factions.some(f => split.factions.includes(f)));
+    const facts = crown ? [...context, split, crown] : [...context, split];
+    facts.forEach(e => consumed.add(e.id));
+    drafts.push(mkDraft(chapterId++, 'crisis', 'the realm breaks', facts));
   }
 
   // ---- famine/disaster arcs: drought+famine cluster per ~5y window ----

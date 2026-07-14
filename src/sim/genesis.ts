@@ -104,6 +104,8 @@ export function genesis(seed: number, config: WorldConfig): SimState {
       s.pawns.flags[leaderPawn] |= 128; // PawnFlag.Named
     }
     faction.leaderId = king.id;
+    faction.dynasty = { clan: king.name.split(' ').slice(-1)[0], foundedTick: 0 };
+    faction.legitimacy = 90;
     s.named.push(king);
     s.namedActive++;
 

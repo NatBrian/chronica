@@ -37,7 +37,7 @@ export function loyaltyBreakdown(s: SimState, st: Settlement): LoyaltyModifier[]
     mods.push({ label: 'uprooted folk among us', value: -Math.min(12, (refugees * 30 / pop) | 0) });
   }
 
-  // the ruler: stewardship and legitimacy
+  // the ruler: stewardship and legitimacy (M9: legitimacy is a real stat)
   const king = f.leaderId >= 0 ? s.named[f.leaderId] : null;
   if (!king || king.deathTick >= 0) {
     mods.push({ label: 'an empty throne', value: -10 });
@@ -45,9 +45,9 @@ export function loyaltyBreakdown(s: SimState, st: Settlement): LoyaltyModifier[]
     if (king.pawnIdx >= 0 && s.pawns.charisma[king.pawnIdx] > 160) {
       mods.push({ label: `${king.name} is beloved`, value: 8 });
     }
-    const crowned = king.memories.find(m => m.text.includes('took the crown'));
-    if (crowned && s.tick - crowned.tick < 3 * TICKS_PER_YEAR) {
-      mods.push({ label: 'an untested new ruler', value: -6 });
+    const legit = f.legitimacy ?? 80;
+    if (legit < 75) {
+      mods.push({ label: 'a contested crown', value: -Math.min(12, ((75 - legit) / 4) | 0) });
     }
   }
 

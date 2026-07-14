@@ -141,6 +141,11 @@ export interface Faction {
   vassalOf: number;           // faction id, -1 none
   /** tick of the last chartered village (M8): expansion is paced, not a burst */
   lastExpansionTick?: number;
+  /** royal house (M9, P1.4): "House Silverfist ruled Baarforge for 300 years" */
+  dynasty?: { clan: string; foundedTick: number };
+  /** 0..100 crown legitimacy (M9): blood heir 90, elected elder 50, rebel 40;
+   *  drifts +1/year toward 100. Low legitimacy bleeds settlement loyalty. */
+  legitimacy?: number;
   prospectEffort: number;
   llmCoverageNum: number; llmCoverageDen: number;
 }
@@ -361,6 +366,15 @@ export function restore(s: SimState, snap: Snapshot): void {
   for (const st of s.settlements) {
     if (st.loyalty === undefined) st.loyalty = 100;
     if (st.capturedTick === undefined) st.capturedTick = -1;
+  }
+  // saves from before M9 lack dynasty fields (P1.4)
+  for (const f of s.factions) {
+    if (f.legitimacy === undefined) f.legitimacy = 80;
+    if (f.dynasty === undefined) {
+      const king = f.leaderId >= 0 ? s.named[f.leaderId] : null;
+      const clan = (king?.name ?? f.name).split(' ').slice(-1)[0];
+      f.dynasty = { clan, foundedTick: 0 };
+    }
   }
   s.named = c.named; s.namedActive = c.namedActive;
   s.squads = c.squads; s.caravans = c.caravans; s.monsters = c.monsters; s.wars = c.wars;

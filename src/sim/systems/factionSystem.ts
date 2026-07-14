@@ -26,6 +26,8 @@ export function factionSystem(s: SimState): void {
     if (phase === 10) {
       maintainDiplomacy(s, f);
       checkExtinction(s, f);
+      // a crown wears in: legitimacy drifts toward 100 (M9, P1.4)
+      if (f.legitimacy !== undefined && f.legitimacy < 100) f.legitimacy++;
     }
     if (phase === 20) {
       checkSuccession(s, f);
@@ -162,6 +164,26 @@ function checkSuccession(s: SimState, f: Faction): void {
   if (!heirNamed) {
     heirNamed = s.named.find(n => n.deathTick < 0 && n.factionId === f.id && n.role === 'heir');
   }
+
+  // heirless succession fractures a wide realm (M9, P1.3): before any elder
+  // is elected, the most disloyal far province seizes the moment
+  if (!heirNamed && s.factions.filter(x => !x.extinct).length < MAX_FACTIONS) {
+    const mine = s.settlements.filter(st => !st.razed && st.factionId === f.id);
+    if (mine.length >= 3) {
+      const provinces = mine
+        .filter(st => st.id !== f.capital && st.popCache > 40)
+        .sort((a, b) => a.loyalty - b.loyalty);
+      if (provinces.length > 0) {
+        emitEvent(s, {
+          type: EventType.Succession, factions: [f.id], severity: 4,
+          x: s.settlements[f.capital]?.x ?? 0, y: s.settlements[f.capital]?.y ?? 0,
+          text: `Y${yearOf(s.tick)}: ${king ? `${king.name} is dead and` : 'The throne stands empty and'} no heir holds ${f.name}. The realm trembles.`,
+        });
+        splitFaction(s, f, provinces[0]);
+      }
+    }
+  }
+
   let newKingPawn = heirNamed?.pawnIdx ?? -1;
   if (newKingPawn < 0) {
     // trait-ranked elder pool: highest charisma adult
@@ -193,6 +215,22 @@ function checkSuccession(s: SimState, f: Faction): void {
   nc.role = 'king';
   if (king) nc.parentNamedId = nc.parentNamedId >= 0 ? nc.parentNamedId : king.id;
   f.leaderId = nc.id;
+  // dynasty + legitimacy bookkeeping (M9, P1.4)
+  const blood = heirNamed !== undefined && nc.id === heirNamed.id;
+  f.legitimacy = blood ? 90 : 50;
+  const newClan = nc.name.split(' ').slice(-1)[0];
+  if (f.dynasty && newClan !== f.dynasty.clan && !blood) {
+    const reigned = yearOf(s.tick - f.dynasty.foundedTick);
+    emitEvent(s, {
+      type: EventType.Succession, actors: [nc.id], factions: [f.id],
+      causes, severity: 4,
+      x: s.settlements[f.capital]?.x ?? 0, y: s.settlements[f.capital]?.y ?? 0,
+      text: `Y${yearOf(s.tick)}: The crown of ${f.name} passes from House ${f.dynasty.clan} to House ${newClan}${reigned >= 20 ? ` after ${reigned} years of ${f.dynasty.clan} rule` : ''}.`,
+    });
+    f.dynasty = { clan: newClan, foundedTick: s.tick };
+  } else if (!f.dynasty) {
+    f.dynasty = { clan: newClan, foundedTick: s.tick };
+  }
   // grudges of the dead pass to heirs via the faction ledger; landmark memory:
   nc.memories.push({
     text: `Y${yearOf(s.tick)}: I took the crown of ${f.name}${king ? ` after ${king.name}` : ''}`,
@@ -320,10 +358,30 @@ function checkRebellion(s: SimState, f: Faction): void {
   }
 }
 
+/** A dead faction's id is a free slot (04): pairKey addressing is MAX_FACTIONS
+ *  wide, so rebellion-born factions must reuse extinct ids, never grow past 8. */
+function claimFactionSlot(s: SimState): number {
+  const reuse = s.factions.find(f =>
+    f.extinct && !s.settlements.some(st => !st.razed && st.factionId === f.id));
+  if (reuse) {
+    // wipe the old pair rows: a new banner owes and is owed nothing
+    for (const o of s.factions) {
+      if (o.id === reuse.id) continue;
+      s.pairs[pairKey(reuse.id, o.id)] = {
+        diplo: DiploState.Neutral, grudge: 0, ledger: [], embargo: false, truceUntil: 0,
+      };
+      if (o.vassalOf === reuse.id) o.vassalOf = -1;   // dead overlord's chains break
+    }
+    return reuse.id;
+  }
+  return s.factions.length < MAX_FACTIONS ? s.factions.length : -1;
+}
+
 function splitFaction(s: SimState, parent: Faction, st: Settlement): void {
-  const rng = s.rng.get('names');
+  const slot = claimFactionSlot(s);
+  if (slot < 0) return;                              // the world is full
   const nf: Faction = {
-    id: s.factions.length,
+    id: slot,
     race: parent.race,
     name: `Free ${st.name}`,
     god: parent.god,
@@ -343,13 +401,25 @@ function splitFaction(s: SimState, parent: Faction, st: Settlement): void {
     prospectEffort: 0,
     llmCoverageNum: 0, llmCoverageDen: 0,
   };
-  s.factions.push(nf);
+  if (slot < s.factions.length) s.factions[slot] = nf;
+  else s.factions.push(nf);
   st.factionId = nf.id;
   st.loyalty = 100;                // its own banner now
   st.capturedTick = -1;
   for (let i = 0; i < s.pawnCount; i++) {
     if (!(s.pawns.flags[i] & PawnFlag.Alive)) continue;
     if (s.pawns.settlementId[i] === st.id) s.pawns.factionId[i] = nf.id;
+  }
+  // soldiers of the seceded town desert their old banner and go home (M9)
+  for (const sq of s.squads) {
+    if (sq.factionId !== parent.id) continue;
+    sq.members = sq.members.filter(m => {
+      if (s.pawns.factionId[m] !== nf.id) return true;
+      s.pawns.squadId[m] = 65535;
+      s.pawns.flags[m] &= ~PawnFlag.Fighting;
+      return false;
+    });
+    if (sq.members.length === 0) sq.state = 'disband';
   }
   // rebel leader
   let best = -1, bestScore = -1;
@@ -366,8 +436,12 @@ function splitFaction(s: SimState, parent: Faction, st: Settlement): void {
   });
   if (best >= 0) {
     const nc = promoteNamed(s, best, 'king', `Led the revolt of ${st.name}.`, [ev.id]);
-    if (nc) nf.leaderId = nc.id;
+    if (nc) {
+      nf.leaderId = nc.id;
+      nf.dynasty = { clan: nc.name.split(' ').slice(-1)[0], foundedTick: s.tick };
+    }
   }
+  nf.legitimacy = 40;              // a rebel crown sits uneasy (P1.4)
   setDiplo(s, parent.id, nf.id, DiploState.Hostile);
   adjustLedger(s, parent.id, nf.id, -5, 'rebellion');
 }

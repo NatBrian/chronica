@@ -175,9 +175,10 @@ function drawTemplate(
   }
 }
 
-/** Bake the full pawn atlas: 4 races × 4 factions × 5 jobs × 3 variants. */
+/** Bake the full pawn atlas: 4 races × 8 factions × 5 jobs × 3 variants.
+ *  Factions 4-7 are rebellion-born (M9); their ramps live in palette.ts. */
 export function bakePawnAtlas(): PawnAtlas {
-  const cols = 4 * 5 * 3;             // faction × job × variant per row
+  const cols = 8 * 5 * 3;             // faction × job × variant per row
   const rows = 4;                      // race
   const W = cols * SPRITE_W, H = rows * SPRITE_H;
   const canvas = typeof OffscreenCanvas !== 'undefined'
@@ -188,7 +189,7 @@ export function bakePawnAtlas(): PawnAtlas {
   const index: Record<string, { x: number; y: number }> = {};
   for (let race = 0; race < 4; race++) {
     let col = 0;
-    for (let faction = 0; faction < 4; faction++) {
+    for (let faction = 0; faction < 8; faction++) {
       for (let j = 0; j < JOBS.length; j++) {
         for (let variant = 0; variant < 3; variant++) {
           const ox = col * SPRITE_W, oy = race * SPRITE_H;

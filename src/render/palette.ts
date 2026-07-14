@@ -20,12 +20,17 @@ export const P = {
   darkGray: 24, charcoal: 25, purple: 26, red: 27, salmon: 28, pink: 29, mossYellow: 30, ocher: 31,
 } as const;
 
-/** Faction identity ramps (4 colors each) from palette slots (06). */
+/** Faction identity ramps (4 colors each) from palette slots (06).
+ *  Slots 4-7 belong to rebellion-born factions (M9). */
 export const FACTION_RAMPS: readonly (readonly [number, number, number, number])[] = [
   [P.blue, P.skyBlue, P.paleBlue, P.navy],        // faction 0 (humans default)
   [P.green, P.lime, P.darkGreen, P.teal],          // faction 1 (elves)
   [P.ocher, P.tan, P.rust, P.brown],               // faction 2 (dwarves)
   [P.red, P.salmon, P.maroon, P.charcoal],         // faction 3 (orcs)
+  [P.purple, P.pink, P.deepPurple, P.navy],        // faction 4 (rebel)
+  [P.cyan, P.paleBlue, P.seaBlue, P.teal],         // faction 5 (rebel)
+  [P.pink, P.salmon, P.purple, P.maroon],          // faction 6 (rebel)
+  [P.mossYellow, P.yellow, P.olive, P.darkGreen],  // faction 7 (rebel)
 ];
 
 /** Faction UI colors (8 slots; 4-7 reserved for M9 faction births). */
