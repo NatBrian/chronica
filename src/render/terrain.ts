@@ -76,6 +76,155 @@ export function tileColor(m: RenderMapData, i: number, x: number, y: number): [n
   ];
 }
 
+const hex = (slot: number) => `rgb(${DB32_RGB[slot][0]},${DB32_RGB[slot][1]},${DB32_RGB[slot][2]})`;
+
+/** Terrain beauty pass (doc 13 V3): grass tufts, flowers, trees with shadows,
+ *  rocks, shore foam, wave dashes, reeds, snow caps. All seeded by tileHash,
+ *  all baked into the chunk: zero runtime cost. */
+function decorate(
+  ctx: CanvasRenderingContext2D, m: RenderMapData,
+  baseX: number, baseY: number, px: number,
+): void {
+  const N = m.size;
+  const isWater = (b: number) => b === Biome.DeepOcean || b === Biome.Ocean || b === Biome.Lake;
+  for (let ty = 0; ty < CHUNK_TILES; ty++) {
+    for (let tx = 0; tx < CHUNK_TILES; tx++) {
+      const wx = baseX + tx, wy = baseY + ty;
+      if (wx >= N || wy >= N) continue;
+      const i = wy * N + wx;
+      const b = m.biome[i];
+      const h = tileHash(wx, wy);
+      const ox = tx * px, oy = ty * px;
+      const u = (k: number) => ((h >>> (k * 3)) & 7) / 8;   // seeded sub-tile coords
+
+      if (isWater(b)) {
+        // wave dashes + shore foam against any land neighbor
+        if ((h & 31) === 3) {
+          ctx.fillStyle = 'rgba(203,219,252,0.35)';
+          ctx.fillRect(ox + u(1) * px * 0.6, oy + u(2) * px, px * 0.4, 1);
+        }
+        const landRight = wx + 1 < N && !isWater(m.biome[i + 1]);
+        const landDown = wy + 1 < N && !isWater(m.biome[i + N]);
+        const landLeft = wx > 0 && !isWater(m.biome[i - 1]);
+        const landUp = wy > 0 && !isWater(m.biome[i - N]);
+        ctx.fillStyle = 'rgba(255,255,255,0.55)';
+        if (landRight) ctx.fillRect(ox + px - 2, oy + u(3) * px * 0.5, 2, px * 0.55);
+        if (landLeft) ctx.fillRect(ox, oy + u(4) * px * 0.5, 2, px * 0.55);
+        if (landDown) ctx.fillRect(ox + u(5) * px * 0.5, oy + px - 2, px * 0.55, 2);
+        if (landUp) ctx.fillRect(ox + u(6) * px * 0.5, oy, px * 0.55, 2);
+        continue;
+      }
+
+      // biome edge dither: sprinkle a few px of the right/down neighbor color
+      const nb = wx + 1 < N ? m.biome[i + 1] : b;
+      if (nb !== b && !isWater(nb) && (h & 3) === 0) {
+        const [nr, ng, nbl] = tileColor(m, i + 1, wx + 1, wy);
+        ctx.fillStyle = `rgb(${nr},${ng},${nbl})`;
+        ctx.fillRect(ox + px - 2, oy + u(1) * (px - 2), 2, 2);
+        ctx.fillRect(ox + px - 4, oy + u(2) * (px - 2), 2, 2);
+      }
+
+      switch (b) {
+        case Biome.Grassland:
+        case Biome.Steppe: {
+          // grass tufts
+          if ((h & 7) < 3) {
+            ctx.fillStyle = b === Biome.Steppe ? hex(P.olive) : hex(P.darkGreen);
+            ctx.fillRect(ox + u(1) * (px - 2), oy + u(2) * (px - 2), 1, 2);
+            ctx.fillRect(ox + u(3) * (px - 2), oy + u(4) * (px - 2), 1, 2);
+          }
+          // flowers, rare
+          if ((h % 97) === 5) {
+            ctx.fillStyle = (h & 1) ? hex(P.yellow) : hex(P.pink);
+            ctx.fillRect(ox + u(5) * (px - 1), oy + u(6) * (px - 1), Math.max(1, px / 12), Math.max(1, px / 12));
+          }
+          // lone tree on lush grass
+          if (m.forest[i] === 0 && (h % 53) === 7 && m.fertility[i] > 90) {
+            tree(ctx, ox + px / 2, oy + px / 2, px * 0.5, hex(P.green), hex(P.darkGreen));
+          }
+          break;
+        }
+        case Biome.Forest:
+        case Biome.DarkForest: {
+          const dense = m.forest[i] > 90;
+          const canopy = b === Biome.DarkForest ? hex(P.darkSlate) : hex(P.darkGreen);
+          const lit = b === Biome.DarkForest ? hex(P.darkGreen) : hex(P.green);
+          if ((h & 3) < (dense ? 3 : 2)) {
+            tree(ctx, ox + u(1) * px * 0.6 + px * 0.2, oy + u(2) * px * 0.6 + px * 0.2, px * (0.4 + u(3) * 0.3), lit, canopy);
+          }
+          if (dense && (h & 7) === 1) {
+            tree(ctx, ox + u(4) * px * 0.6 + px * 0.2, oy + u(5) * px * 0.6 + px * 0.2, px * 0.35, lit, canopy);
+          }
+          break;
+        }
+        case Biome.Mountain: {
+          // rock facets: a light + a dark wedge
+          if ((h & 3) === 0) {
+            ctx.fillStyle = 'rgba(255,255,255,0.18)';
+            ctx.fillRect(ox + u(1) * px * 0.5, oy + u(2) * px * 0.5, px * 0.4, px * 0.2);
+            ctx.fillStyle = 'rgba(0,0,0,0.22)';
+            ctx.fillRect(ox + u(3) * px * 0.5 + px * 0.2, oy + u(4) * px * 0.5 + px * 0.25, px * 0.4, px * 0.2);
+          }
+          // snow caps on the high peaks
+          if (m.elevation[i] > 210 && (h & 1) === 0) {
+            ctx.fillStyle = hex(P.white);
+            ctx.fillRect(ox + u(5) * px * 0.5, oy + u(6) * px * 0.4, px * 0.45, Math.max(1, px * 0.15));
+          }
+          break;
+        }
+        case Biome.Hills: {
+          if ((h & 7) === 2) {
+            ctx.fillStyle = 'rgba(0,0,0,0.15)';
+            ctx.fillRect(ox + u(1) * px * 0.5, oy + u(2) * px * 0.7, px * 0.5, 1);
+            ctx.fillRect(ox + u(3) * px * 0.5, oy + u(4) * px * 0.7 + 2, px * 0.35, 1);
+          }
+          if ((h % 41) === 3) {
+            ctx.fillStyle = hex(P.gray);
+            ctx.fillRect(ox + u(5) * px * 0.7, oy + u(6) * px * 0.7, px * 0.2, px * 0.15);
+          }
+          break;
+        }
+        case Biome.Swamp: {
+          if ((h & 3) === 1) {
+            ctx.fillStyle = 'rgba(20,20,31,0.25)';
+            ctx.fillRect(ox + u(1) * px * 0.7, oy + u(2) * px * 0.7, px * 0.3, px * 0.2);
+          }
+          if ((h & 7) === 4) {
+            ctx.fillStyle = hex(P.darkGreen);
+            ctx.fillRect(ox + u(3) * px, oy + u(4) * px * 0.5, 1, px * 0.4);
+          }
+          break;
+        }
+        case Biome.Beach: {
+          if ((h & 7) === 0) {
+            ctx.fillStyle = 'rgba(255,255,255,0.3)';
+            ctx.fillRect(ox + u(1) * px, oy + u(2) * px, 1, 1);
+            ctx.fillRect(ox + u(3) * px, oy + u(4) * px, 1, 1);
+          }
+          break;
+        }
+      }
+      // river sparkle
+      if ((m.flags[i] & 1) && (h & 15) === 6) {
+        ctx.fillStyle = 'rgba(203,219,252,0.8)';
+        ctx.fillRect(ox + u(1) * px, oy + u(2) * px, Math.max(1, px / 10), 1);
+      }
+    }
+  }
+}
+
+/** tiny tree: shadow, trunk, canopy with a lit crown */
+function tree(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, lit: string, dark: string): void {
+  ctx.fillStyle = 'rgba(20,20,31,0.3)';
+  ctx.beginPath(); ctx.ellipse(x + r * 0.25, y + r * 0.5, r * 0.7, r * 0.3, 0, 0, 7); ctx.fill();
+  ctx.fillStyle = '#663931';
+  ctx.fillRect(x - 1, y, 2, r * 0.5);
+  ctx.fillStyle = dark;
+  ctx.beginPath(); ctx.arc(x, y - r * 0.35, r * 0.65, 0, 7); ctx.fill();
+  ctx.fillStyle = lit;
+  ctx.beginPath(); ctx.arc(x - r * 0.2, y - r * 0.5, r * 0.38, 0, 7); ctx.fill();
+}
+
 export class TerrainCache {
   private chunks = new Map<string, HTMLCanvasElement | OffscreenCanvas>();
   private dirty = new Set<string>();
@@ -130,6 +279,8 @@ export class TerrainCache {
     (tmp.getContext('2d') as CanvasRenderingContext2D).putImageData(img, 0, 0);
     ctx.clearRect(0, 0, size, size);
     ctx.drawImage(tmp as CanvasImageSource, 0, 0, size, size);
+    // V3 (doc 13): per-tile decals at readable zooms; bake-time, so free per frame
+    if (pxPerTile >= 8) decorate(ctx, m, baseX, baseY, pxPerTile);
     return c;
   }
 
