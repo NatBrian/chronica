@@ -353,6 +353,14 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
   });
   document.getElementById('btn-export')!.addEventListener('click', () => worker.postMessage({ t: 'exportJournal' }));
   document.getElementById('btn-timelapse')!.addEventListener('click', startTimelapse);
+  // director mode (11 H4 / doc 13 V2): the camera follows the story
+  let directorMode = false;
+  const dirVisited = new Set<number>();
+  const btnDirector = document.getElementById('btn-director')!;
+  btnDirector.addEventListener('click', () => {
+    directorMode = !directorMode;
+    btnDirector.classList.toggle('active', directorMode);
+  });
   const importFile = document.getElementById('import-file') as HTMLInputElement;
   document.getElementById('btn-import')!.addEventListener('click', () => importFile.click());
   importFile.addEventListener('change', async () => {
@@ -682,6 +690,7 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
       const evActors: number[] = (ev as any).actors ?? [];
       if (ev.type === 39 /* CharacterDied */ && evActors.some(a => starred.has(a) || a === followId)) {
         beacons.force(ev as any, performance.now());
+        spectacle.force(ev as any, 'memorial', performance.now());
         toast(`★ ${ev.text.replace(/^Y\d+: /, '')}`, 'a favorite has fallen', true, () => {
           flyTarget = { x: ev.x, y: ev.y };
           worker.postMessage({ t: 'chain', eventId: ev.id });
@@ -1863,6 +1872,12 @@ ${parts.join('\n')}</body>`;
       beacons.draw(renderer.ctx, renderer.camera, now);
       beacons.drawArrows(renderer.ctx, renderer.camera, now);
       spectacle.drawOverlay(renderer.ctx, renderer.camera);
+      // director mode: drift the camera to the newest untold scene
+      if (directorMode) {
+        const sc = (spectacle as any)['scenes'].find((s2: any) => !dirVisited.has(s2.ev.id));
+        if (sc) { dirVisited.add(sc.ev.id); flyTarget = { x: sc.ev.x, y: sc.ev.y }; }
+        if (dirVisited.size > 200) dirVisited.clear();
+      }
       // camera shake rides a CSS transform: sim canvas only, no state drift
       canvas.style.transform = spectacle.shake > 0.05
         ? `translate(${(Math.random() - 0.5) * spectacle.shake * 2}px, ${(Math.random() - 0.5) * spectacle.shake * 2}px)`

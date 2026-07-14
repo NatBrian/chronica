@@ -14,9 +14,13 @@ export interface SpectacleEventIn {
   x: number; y: number; text: string; factions?: number[];
 }
 
+type SceneKind =
+  | 'battle' | 'rout' | 'siege' | 'dragon' | 'razing' | 'coronation'
+  | 'plague' | 'rebellion' | 'founding' | 'famine' | 'festival' | 'memorial';
+
 interface Scene {
   ev: SpectacleEventIn;
-  kind: 'battle' | 'rout' | 'siege' | 'dragon' | 'razing' | 'coronation';
+  kind: SceneKind;
   bornAt: number;
   durMs: number;
   fA: number; fB: number;             // faction colors involved
@@ -36,7 +40,10 @@ export class Spectacle {
   shake = 0;
   flash = 0;
 
-  private classify(ev: SpectacleEventIn): Scene['kind'] | null {
+  /** letterbox title card (era turns); drawn by drawOverlay */
+  private card: { text: string; bornAt: number } | null = null;
+
+  private classify(ev: SpectacleEventIn): SceneKind | null {
     switch (ev.type) {
       case EventType.BattleFought:
         if (ev.text.includes('breaks and runs')) return 'rout';
@@ -45,8 +52,25 @@ export class Spectacle {
       case EventType.DragonRaid: return 'dragon';
       case EventType.SettlementRazed: return 'razing';
       case EventType.Coronation: return 'coronation';
+      case EventType.Plague: return ev.text.includes('arrives') || ev.text.includes('reaches') ? 'plague' : null;
+      case EventType.Rebellion:
+      case EventType.FactionSplit: return 'rebellion';
+      case EventType.SettlementFounded: return 'founding';
+      case EventType.Famine: return 'famine';
+      case EventType.MarriageHeld:
+      case EventType.AllianceFormed: return 'festival';
+      case EventType.Festival:
+        if (ev.text.includes('The age turns')) return null;  // handled as a card
+        return 'festival';
       default: return null;
     }
+  }
+
+  /** externally forced scenes (starred deaths get a memorial) */
+  force(ev: SpectacleEventIn, kind: SceneKind, now: number): void {
+    if (this.seen.has(ev.id)) return;
+    this.seen.set(ev.id, now);
+    this.scenes.push({ ev, kind, bornAt: now, durMs: 6000, fA: ev.factions?.[0] ?? 0, fB: ev.factions?.[1] ?? 3 });
   }
 
   update(majors: SpectacleEventIn[], simTick: number, now: number, speed: number): void {
@@ -59,6 +83,12 @@ export class Spectacle {
     for (const ev of majors) {
       const age = simTick - ev.tick;
       if (age < 0 || age > WINDOW_TICKS || this.seen.has(ev.id)) continue;
+      // era turns are a full-screen title card, not a located scene
+      if (ev.type === EventType.Festival && ev.text.includes('The age turns')) {
+        this.seen.set(ev.id, now);
+        this.card = { text: ev.text.replace(/^Y\d+: The age turns\. Elders say /, '').replace(/ are upon the world\.$/, ''), bornAt: now };
+        continue;
+      }
       const kind = this.classify(ev);
       if (!kind) continue;
       this.seen.set(ev.id, now);
@@ -101,18 +131,52 @@ export class Spectacle {
         case 'dragon': this.dragon(ctx, sc, 0, 0, t, now); break;
         case 'razing': this.razing(ctx, sc, 0, 0, t, now); break;
         case 'coronation': this.coronation(ctx, sc, 0, 0, t, now); break;
+        case 'plague': this.plague(ctx, sc, t, now); break;
+        case 'rebellion': this.rebellion(ctx, sc, t, now); break;
+        case 'founding': this.founding(ctx, sc, t, now); break;
+        case 'famine': this.famine(ctx, sc, t, now); break;
+        case 'festival': this.festival(ctx, sc, t, now); break;
+        case 'memorial': this.memorial(ctx, sc, t, now); break;
       }
       ctx.restore();
     }
     ctx.globalAlpha = 1;
   }
 
-  /** post-pass: flash vignette (main calls after everything else) */
+  /** post-pass: flash vignette + era title card (main calls last) */
   drawOverlay(ctx: CanvasRenderingContext2D, cam: Camera): void {
     if (this.flash > 0.02) {
       ctx.globalAlpha = this.flash * 0.35;
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(0, 0, cam.viewW, cam.viewH);
+      ctx.globalAlpha = 1;
+    }
+    // memorial scenes dim the whole world for a breath
+    const mem = this.scenes.find(s => s.kind === 'memorial');
+    if (mem) {
+      const mt = Math.min(1, (performance.now() - mem.bornAt) / mem.durMs);
+      ctx.globalAlpha = 0.28 * Math.sin(mt * Math.PI);
+      ctx.fillStyle = '#14141f';
+      ctx.fillRect(0, 0, cam.viewW, cam.viewH);
+      ctx.globalAlpha = 1;
+    }
+    if (this.card) {
+      const t = (performance.now() - this.card.bornAt) / 3500;
+      if (t >= 1) { this.card = null; return; }
+      const ease = t < 0.15 ? t / 0.15 : t > 0.85 ? (1 - t) / 0.15 : 1;
+      const barH = 46 * ease;
+      ctx.fillStyle = '#14141f';
+      ctx.fillRect(0, 0, cam.viewW, barH);
+      ctx.fillRect(0, cam.viewH - barH, cam.viewW, barH);
+      ctx.globalAlpha = ease;
+      ctx.fillStyle = '#fbf236';
+      ctx.font = '11px system-ui';
+      ctx.textAlign = 'center';
+      ctx.fillText('T H E   A G E   T U R N S', cam.viewW / 2, cam.viewH / 2 - 16);
+      ctx.fillStyle = '#cbdbfc';
+      ctx.font = '600 22px Georgia, serif';
+      ctx.fillText(this.card.text, cam.viewW / 2, cam.viewH / 2 + 12);
+      ctx.textAlign = 'left';
       ctx.globalAlpha = 1;
     }
   }
@@ -386,6 +450,213 @@ export class Spectacle {
       ctx.globalAlpha = 1;
     }
     if (t < 0.05) { this.shake = Math.max(this.shake, 2); this.flash = Math.max(this.flash, 0.4); }
+  }
+
+  /** a sickly ring creeps outward; black flags rise; miasma drifts */
+  private plague(ctx: CanvasRenderingContext2D, sc: Scene, t: number, now: number): void {
+    const r = 8 + t * 34;
+    ctx.globalAlpha = 0.30 * (1 - t * 0.5);
+    ctx.strokeStyle = '#6abe30';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    for (let a = 0; a <= 24; a++) {
+      const ang = a / 24 * 6.28;
+      const rr = r + Math.sin(ang * 5 + now / 600) * 3;
+      const px2 = Math.cos(ang) * rr, py = Math.sin(ang) * rr * 0.7;
+      if (a === 0) ctx.moveTo(px2, py); else ctx.lineTo(px2, py);
+    }
+    ctx.stroke();
+    ctx.globalAlpha = 0.18;
+    ctx.fillStyle = '#99e550';
+    ctx.beginPath(); ctx.ellipse(0, 0, r, r * 0.7, 0, 0, 7); ctx.fill();
+    ctx.globalAlpha = 1;
+    // black flags on stricken houses
+    for (let f = 0; f < 4; f++) {
+      if (t < 0.15 + f * 0.12) continue;
+      const fx = (sr(sc.ev.id, f) - 0.5) * 30;
+      const fy = (sr(sc.ev.id, f + 4) - 0.5) * 20;
+      ctx.fillStyle = '#14141f';
+      ctx.fillRect(Math.round(fx), Math.round(fy - 8), 1, 8);
+      ctx.fillRect(Math.round(fx + 1), Math.round(fy - 8), 5, 3);
+    }
+    // miasma wisps
+    for (let m = 0; m < 5; m++) {
+      const mt = ((now / 2000) + sr(sc.ev.id, m + 10)) % 1;
+      ctx.globalAlpha = 0.25 * (1 - mt);
+      ctx.fillStyle = '#99e550';
+      ctx.beginPath();
+      ctx.arc((sr(sc.ev.id, m + 20) - 0.5) * 36 + Math.sin(mt * 4) * 4, -mt * 18, 2 + mt * 3, 0, 7);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  /** the old banner burns; an angry ring closes in; the new banner rises */
+  private rebellion(ctx: CanvasRenderingContext2D, sc: Scene, t: number, now: number): void {
+    const cOld = FACTION_HEX[sc.fA] ?? '#639bff';
+    const cNew = FACTION_HEX[sc.fB] ?? '#76428a';
+    // color shockwave ripples outward
+    const rw = t * 60;
+    ctx.globalAlpha = 0.4 * (1 - t);
+    ctx.strokeStyle = cNew;
+    ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.ellipse(0, 0, rw, rw * 0.65, 0, 0, 7); ctx.stroke();
+    ctx.globalAlpha = 1;
+    // old banner burning at the keep
+    ctx.fillStyle = '#1a1c2c';
+    ctx.fillRect(-1, -18, 2, 18);
+    ctx.fillStyle = cOld;
+    ctx.fillRect(1, -18, 9, 6);
+    const burn = Math.min(1, t / 0.5);
+    for (let f = 0; f < 5; f++) {
+      const fl = ((now / 100) | 0) + f;
+      ctx.fillStyle = fl % 3 === 0 ? '#fbf236' : fl % 3 === 1 ? '#df7126' : '#d95763';
+      ctx.fillRect(Math.round(1 + sr(sc.ev.id, f + fl % 3) * 9 * burn), Math.round(-18 + sr(sc.ev.id, f + 9) * 5), 2, 2);
+    }
+    // the crowd converges, fists up
+    for (let p = 0; p < 10; p++) {
+      const pa = p / 10 * 6.28 + sr(sc.ev.id, p) * 0.3;
+      const pr = 44 - Math.min(1, t / 0.6) * 26;
+      const hop = Math.abs(Math.sin(now / 140 + p)) * 2;
+      ctx.fillStyle = '#d95763';
+      ctx.fillRect(Math.round(Math.cos(pa) * pr), Math.round(Math.sin(pa) * pr * 0.6 - hop), 2, 3);
+    }
+    // new banner rises after the old is ash
+    if (t > 0.55) {
+      const rise = Math.min(1, (t - 0.55) / 0.3);
+      ctx.fillStyle = '#1a1c2c';
+      ctx.fillRect(11, -Math.round(18 * rise), 2, Math.round(18 * rise));
+      ctx.fillStyle = cNew;
+      ctx.fillRect(13, -Math.round(18 * rise), 9, 6);
+    }
+  }
+
+  /** a wagon rolls in; tents pop; the name writes itself */
+  private founding(ctx: CanvasRenderingContext2D, sc: Scene, t: number, now: number): void {
+    const dir = sr(sc.ev.id, 1) > 0.5 ? 1 : -1;
+    // wagon rolls to the site over the first 40%
+    const wt = Math.min(1, t / 0.4);
+    const wx = dir * (70 - wt * 70);
+    ctx.fillStyle = '#8a6f30';
+    ctx.fillRect(Math.round(wx - 6), -6, 12, 5);
+    ctx.fillStyle = '#eec39a';
+    ctx.fillRect(Math.round(wx - 5), -9, 10, 3);
+    ctx.fillStyle = '#1a1c2c';
+    const wheel = (now / 60) % 2 < 1 && wt < 1 ? 1 : 0;
+    ctx.fillRect(Math.round(wx - 5), -1 + wheel, 2, 2);
+    ctx.fillRect(Math.round(wx + 3), -1 + wheel, 2, 2);
+    // tents pop up one by one
+    for (let tn = 0; tn < 3; tn++) {
+      const start = 0.35 + tn * 0.15;
+      if (t < start) continue;
+      const gs = Math.min(1, (t - start) / 0.12);
+      const tx = (tn - 1) * 14 + (sr(sc.ev.id, tn) - 0.5) * 6;
+      ctx.fillStyle = '#eec39a';
+      ctx.beginPath();
+      ctx.moveTo(tx, -8 * gs);
+      ctx.lineTo(tx - 5 * gs, 0);
+      ctx.lineTo(tx + 5 * gs, 0);
+      ctx.fill();
+      ctx.fillStyle = '#663931';
+      ctx.fillRect(Math.round(tx - 1), -2 * gs, 2, 2 * gs);
+    }
+    // first hearth smoke
+    if (t > 0.8) {
+      const st2 = ((now / 1800)) % 1;
+      ctx.globalAlpha = 0.4 * (1 - st2);
+      ctx.fillStyle = '#9badb7';
+      ctx.beginPath(); ctx.arc(Math.sin(st2 * 5) * 2, -10 - st2 * 14, 1.5 + st2 * 2, 0, 7); ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+    // the name writes itself
+    const name = sc.ev.text.match(/roofs of ([^.]+)\./)?.[1] ?? '';
+    if (name && t > 0.5) {
+      const chars = Math.min(name.length, Math.floor((t - 0.5) / 0.4 * name.length) + 1);
+      ctx.font = '600 9px system-ui';
+      ctx.fillStyle = '#14141fc8';
+      ctx.fillRect(-name.length * 2.6 - 3, 8, name.length * 5.2 + 6, 12);
+      ctx.fillStyle = '#cbdbfc';
+      ctx.textAlign = 'center';
+      ctx.fillText(name.slice(0, chars) + (chars < name.length ? '_' : ''), 0, 17);
+      ctx.textAlign = 'left';
+    }
+  }
+
+  /** the color drains; crows circle; folk shuffle slow */
+  private famine(ctx: CanvasRenderingContext2D, sc: Scene, t: number, now: number): void {
+    ctx.globalAlpha = 0.30 * Math.sin(Math.min(1, t * 2) * Math.PI / 2);
+    ctx.fillStyle = '#696a6a';
+    ctx.beginPath(); ctx.ellipse(0, 0, 34, 22, 0, 0, 7); ctx.fill();
+    ctx.globalAlpha = 1;
+    for (let c = 0; c < 4; c++) {
+      const a = now / 1600 + c * 1.6;
+      const bx = Math.cos(a) * (18 + c * 4);
+      const by = -14 + Math.sin(a) * 7;
+      const flap = Math.sin(now / 110 + c) > 0 ? 1 : 0;
+      ctx.strokeStyle = '#222034';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(bx - 2, by + flap); ctx.lineTo(bx, by - 1); ctx.lineTo(bx + 2, by + flap);
+      ctx.stroke();
+    }
+    // gaunt shuffle: gray dots inch along
+    for (let p = 0; p < 4; p++) {
+      const pt = ((now / 6000) + sr(sc.ev.id, p)) % 1;
+      ctx.fillStyle = '#9badb7';
+      ctx.fillRect(Math.round(-20 + pt * 40), Math.round(6 + (sr(sc.ev.id, p + 5) - 0.5) * 14), 2, 3);
+    }
+  }
+
+  /** bonfire, fireworks, a dancing ring */
+  private festival(ctx: CanvasRenderingContext2D, sc: Scene, t: number, now: number): void {
+    // bonfire
+    for (let f = 0; f < 6; f++) {
+      const fl = ((now / 90) | 0) + f;
+      ctx.fillStyle = fl % 3 === 0 ? '#fbf236' : fl % 3 === 1 ? '#df7126' : '#d95763';
+      ctx.fillRect(Math.round((sr(sc.ev.id, f + fl % 4) - 0.5) * 6), Math.round(-3 - sr(sc.ev.id, f + fl % 5) * 7), 2, 3);
+    }
+    ctx.fillStyle = '#663931';
+    ctx.fillRect(-4, 0, 8, 2);
+    // dancing ring circles the fire
+    for (let p = 0; p < 8; p++) {
+      const a = now / 900 + p / 8 * 6.28;
+      const hop = Math.abs(Math.sin(now / 150 + p)) * 3;
+      ctx.fillStyle = p % 2 ? '#cbdbfc' : FACTION_HEX[sc.fA] ?? '#cbdbfc';
+      ctx.fillRect(Math.round(Math.cos(a) * 16), Math.round(Math.sin(a) * 10 - hop), 2, 3);
+    }
+    // fireworks: radial bursts on a seeded cadence
+    for (let b = 0; b < 2; b++) {
+      const bt = ((now / 1600) + b * 0.5) % 1;
+      if (bt > 0.55) continue;
+      const bx = (sr(sc.ev.id, b + ((now / 1600) | 0)) - 0.5) * 50;
+      const by = -26 - sr(sc.ev.id, b + 30) * 12;
+      const rr = bt * 26;
+      ctx.globalAlpha = 1 - bt / 0.55;
+      for (let s2 = 0; s2 < 10; s2++) {
+        const sa = s2 / 10 * 6.28;
+        ctx.fillStyle = s2 % 3 === 0 ? '#fbf236' : s2 % 3 === 1 ? '#d77bba' : '#5fcde4';
+        ctx.fillRect(Math.round(bx + Math.cos(sa) * rr), Math.round(by + Math.sin(sa) * rr), 2, 2);
+      }
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  /** a light beam and rising sparks for a fallen favorite */
+  private memorial(ctx: CanvasRenderingContext2D, sc: Scene, t: number, now: number): void {
+    const glow = Math.sin(Math.min(1, t * 1.4) * Math.PI);
+    ctx.globalAlpha = 0.35 * glow;
+    ctx.fillStyle = '#fbf236';
+    ctx.fillRect(-3, -70, 6, 70);
+    ctx.globalAlpha = 0.18 * glow;
+    ctx.fillRect(-8, -70, 16, 70);
+    ctx.globalAlpha = 1;
+    for (let s2 = 0; s2 < 6; s2++) {
+      const st2 = ((now / 2400) + sr(sc.ev.id, s2)) % 1;
+      ctx.globalAlpha = (1 - st2) * glow;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(Math.round((sr(sc.ev.id, s2 + 8) - 0.5) * 14), Math.round(-st2 * 54), 1, 2);
+      ctx.globalAlpha = 1;
+    }
   }
 
   /** golden rays, a crown descends, subjects ring the keep */
