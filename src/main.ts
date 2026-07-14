@@ -5,7 +5,7 @@ import { Renderer } from './render/renderer';
 import { RenderMapData, tileColor } from './render/terrain';
 import { mountSeedBrowser, mountLayerViewer, mountSpritePreview } from './ui/devtools';
 import { bakePawnAtlas, actionToJob, SPRITE_W, SPRITE_H, PawnAtlas } from './render/sprites';
-import { bakeMapIcons, bakeBuildingAtlas, BUILDING_CELL } from './render/mapIcons';
+import { bakeMapIcons, bakeBuildingAtlas, BUILDING_CELL, ICON_W, ICON_H } from './render/mapIcons';
 import { MapMode } from './render/mapMode';
 import { FACTION_HEX } from './render/palette';
 import { eventMeta, CATEGORY_LIST, CATEGORY_COLOR, EventCategory, eraColor } from './ui/eventMeta';
@@ -1716,8 +1716,12 @@ ${parts.join('\n')}</body>`;
       }
       for (const sq of latest?.squads ?? []) {
         const [sx, sy] = cam.worldToScreen(sq.x, sq.y);
-        ctx.font = `${Math.max(14, cam.pxPerTile)}px system-ui`;
-        ctx.fillText(sq.state === 'fight' ? '⚔️' : sq.state === 'rout' ? '🏳' : '🚩', sx, sy);
+        const key = sq.state === 'fight' ? 'swords' : sq.state === 'siege' ? 'm:castle' : 'g:war';
+        const cell = mapIcons.index[key];
+        if (cell) {
+          ctx.drawImage(mapIcons.canvas as CanvasImageSource, cell.x, cell.y, ICON_W, ICON_H,
+            Math.round(sx - 16), Math.round(sy - 14), 32, 26);
+        }
       }
       return;
     }
@@ -1869,8 +1873,8 @@ ${parts.join('\n')}</body>`;
       spectacle.update(majors as any, latest.tick, now, speed);
       spectacle.draw(renderer.ctx, renderer.camera, now);
       beacons.update(majors, latest.tick, now, latest.inPast);
-      beacons.draw(renderer.ctx, renderer.camera, now);
-      beacons.drawArrows(renderer.ctx, renderer.camera, now);
+      beacons.draw(renderer.ctx, renderer.camera, now, mapIcons);
+      beacons.drawArrows(renderer.ctx, renderer.camera, now, mapIcons);
       spectacle.drawOverlay(renderer.ctx, renderer.camera);
       // director mode: drift the camera to the newest untold scene
       if (directorMode) {
@@ -1955,9 +1959,20 @@ ${parts.join('\n')}</body>`;
             const cell = buildingAtlas.index[`${race}:${b.kind}`];
             if (cell) {
               const sc = cam.pxPerTile / BUILDING_CELL;
-              ctx.drawImage(buildingAtlas.canvas as CanvasImageSource,
-                cell.x, cell.y, BUILDING_CELL, BUILDING_CELL,
-                Math.round(sx), Math.round(sy), Math.round(BUILDING_CELL * sc), Math.round(BUILDING_CELL * sc));
+              const flip = ((b.x * 31 + b.y * 17) & 1) === 1;   // V5: variety by mirror
+              if (flip) {
+                ctx.save();
+                ctx.translate(Math.round(sx) + Math.round(BUILDING_CELL * sc), Math.round(sy));
+                ctx.scale(-1, 1);
+                ctx.drawImage(buildingAtlas.canvas as CanvasImageSource,
+                  cell.x, cell.y, BUILDING_CELL, BUILDING_CELL,
+                  0, 0, Math.round(BUILDING_CELL * sc), Math.round(BUILDING_CELL * sc));
+                ctx.restore();
+              } else {
+                ctx.drawImage(buildingAtlas.canvas as CanvasImageSource,
+                  cell.x, cell.y, BUILDING_CELL, BUILDING_CELL,
+                  Math.round(sx), Math.round(sy), Math.round(BUILDING_CELL * sc), Math.round(BUILDING_CELL * sc));
+              }
               if (b.stage < 3) {
                 const sca = buildingAtlas.index['scaffold'];
                 ctx.drawImage(buildingAtlas.canvas as CanvasImageSource,
@@ -2013,12 +2028,14 @@ ${parts.join('\n')}</body>`;
         ctx.fillStyle = '#847e87';
         ctx.beginPath(); ctx.arc(sx + 4, sy - 2, puff + 6, 0, 7); ctx.fill();
         ctx.globalAlpha = 1;
-        ctx.font = `${Math.max(12, cam.pxPerTile)}px system-ui`;
-        ctx.fillText('⚔️', sx - 6, sy - h2 - 2);
+        const sw = mapIcons.index['swords'];
+        ctx.drawImage(mapIcons.canvas as CanvasImageSource, sw.x, sw.y, ICON_W, ICON_H,
+          Math.round(sx - 16), Math.round(sy - h2 - 24), 32, 26);
       }
       if (sq.state === 'siege') {
-        ctx.font = `${Math.max(12, cam.pxPerTile * 0.8)}px system-ui`;
-        ctx.fillText('🏰', sx - 6, sy - h2 - 2);
+        const ca = mapIcons.index['m:castle'];
+        ctx.drawImage(mapIcons.canvas as CanvasImageSource, ca.x, ca.y, ICON_W, ICON_H,
+          Math.round(sx - 14), Math.round(sy - h2 - 22), 28, 23);
       }
     }
     // aftermath (11 §A5): razed sites smolder for ~2 years of sim time,
@@ -2056,8 +2073,12 @@ ${parts.join('\n')}</body>`;
     for (const m of latest.monsters ?? []) {
       const [sx, sy] = cam.worldToScreen(m.x, m.y);
       if (sx < -30 || sy < -30 || sx > cam.viewW + 30 || sy > cam.viewH + 30) continue;
-      ctx.font = `${Math.max(14, cam.pxPerTile * (m.kind === 'dragon' ? 1.6 : 1))}px system-ui`;
-      ctx.fillText(m.kind === 'dragon' ? '🐉' : m.kind === 'troll' ? '🧌' : '🐺', sx, sy);
+      const cell = mapIcons.index[`m:${m.kind}`];
+      if (cell) {
+        const msc = Math.max(2, cam.pxPerTile / 6) * (m.kind === 'dragon' ? 1.5 : 1);
+        ctx.drawImage(mapIcons.canvas as CanvasImageSource, cell.x, cell.y, ICON_W, ICON_H,
+          Math.round(sx - ICON_W * msc / 2), Math.round(sy - ICON_H * msc / 2), ICON_W * msc, ICON_H * msc);
+      }
     }
 
     // pawns: dots at region zoom, sprites at local/close

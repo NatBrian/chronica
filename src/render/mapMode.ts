@@ -254,8 +254,12 @@ export class MapMode {
     for (const m of snap.monsters) {
       const [sx, sy] = cam.worldToScreen(m.x, m.y);
       if (sx < -30 || sy < -30 || sx > cam.viewW + 30 || sy > cam.viewH + 30) continue;
-      ctx.font = `${m.kind === 'dragon' ? 20 : 14}px system-ui`;
-      ctx.fillText(m.kind === 'dragon' ? '🐉' : m.kind === 'troll' ? '🧌' : '🐺', sx, sy);
+      const cell = icons.index[`m:${m.kind}`];
+      if (cell) {
+        const msc = m.kind === 'dragon' ? 2.4 : 1.8;
+        ctx.drawImage(icons.canvas as CanvasImageSource, cell.x, cell.y, ICON_W, ICON_H,
+          Math.round(sx - ICON_W * msc / 2), Math.round(sy - ICON_H * msc / 2), ICON_W * msc, ICON_H * msc);
+      }
     }
 
     // settlement icons + labels (11 §D1; V1 declutter: priority + collision)

@@ -69,6 +69,76 @@ const WALL = [
   'wwwwwwwwwwwwwwwwww',
 ];
 
+// ---- category glyphs + monsters (V5): DB32 replaces every canvas emoji ----
+const GLYPHS: Record<string, string[]> = {
+  'g:war': [
+    '.....s.',
+    '....s..',
+    '.b.s...',
+    '..bs...',
+    '...b...',
+    '..b.b..',
+  ],
+  'g:politics': [
+    'y.y.y..',
+    'yyyyy..',
+    'yyyyy..',
+  ],
+  'g:disaster': [
+    '.ppp...',
+    'p.p.p..',
+    'ppppp..',
+    '.p.p...',
+  ],
+  'g:economy': [
+    '.ooo...',
+    'oyyyo..',
+    'oyyyo..',
+    '.ooo...',
+  ],
+  'g:life': [
+    '..g....',
+    '.gGg...',
+    '..G....',
+    '..G....',
+  ],
+  'g:chapter': [
+    'cc.cc..',
+    'ccccc..',
+    'ccccc..',
+    'cc.cc..',
+  ],
+  'm:dragon': [
+    '.x.......x..',
+    '.XX......XX.',
+    '..XXXXXXXX..',
+    '.XXxXXXXxXX.',
+    '..XXXXXXXXy.',
+    '...XX..XX...',
+  ],
+  'm:troll': [
+    '..GGG...',
+    '.GGGGG..',
+    '.GyGyG..',
+    '.GGGGG..',
+    '..G.G...',
+    '.GG.GG..',
+  ],
+  'm:wolf': [
+    'k....k.',
+    'kkkkkk.',
+    '.kkkkkk',
+    '.k..k..',
+  ],
+  'm:castle': [
+    's.s.s..',
+    'sssss..',
+    's...s..',
+    's.d.s..',
+    'sssss..',
+  ],
+};
+
 const SWORDS = [
   'm.......m',
   'km.....mk',
@@ -98,10 +168,20 @@ function stamp(
         case 'k': slot = P.deepPurple; break;
         case 'm': slot = P.paleBlue; break;
         case 'b': slot = P.brown; break;
+        case 'y': slot = P.yellow; break;
+        case 'g': slot = P.green; break;
+        case 'G': slot = P.darkGreen; break;
+        case 'x': slot = P.red; break;
+        case 'X': slot = P.maroon; break;
+        case 'c': slot = P.skyBlue; break;
+        case 'p': slot = P.purple; break;
+        case 'o': slot = P.orange; break;
+        case 's': slot = P.silver; break;
         default: continue;
       }
       const px = ox + x, py = oy + y;
       if (px < 0 || py < 0 || px >= img.width || py >= img.height) continue;
+      if (slot < 0) continue;
       const o = (py * img.width + px) * 4;
       const rgb = DB32_RGB[slot];
       img.data[o] = rgb[0]; img.data[o + 1] = rgb[1]; img.data[o + 2] = rgb[2];
@@ -202,7 +282,7 @@ export function bakeBuildingAtlas(): BuildingAtlas {
 }
 
 export function bakeMapIcons(): MapIconAtlas {
-  const cols = 4 * 4 + 1;                     // race × tier + swords
+  const cols = 4 * 4 + 1 + Object.keys(GLYPHS).length;   // race × tier + swords + glyphs
   const W = cols * ICON_W, H = ICON_H;
   const canvas = typeof OffscreenCanvas !== 'undefined'
     ? new OffscreenCanvas(W, H)
@@ -242,6 +322,12 @@ export function bakeMapIcons(): MapIconAtlas {
   }
   stamp(img, SWORDS, col * ICON_W + 6, 5, Race.Human);
   index['swords'] = { x: col * ICON_W, y: 0 };
+  col++;
+  for (const [key, rows] of Object.entries(GLYPHS)) {
+    stamp(img, rows, col * ICON_W + 5, 5, Race.Human);
+    index[key] = { x: col * ICON_W, y: 0 };
+    col++;
+  }
   ctx.putImageData(img, 0, 0);
   return { canvas, index };
 }

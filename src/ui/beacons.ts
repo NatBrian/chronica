@@ -5,6 +5,7 @@
 // same beacons at the same years. Render-layer only.
 import { Camera } from '../render/camera';
 import { eventMeta } from './eventMeta';
+import { MapIconAtlas, ICON_W, ICON_H } from '../render/mapIcons';
 import { TICKS_PER_YEAR, EventType } from '../shared/types';
 
 export interface BeaconEvent {
@@ -59,7 +60,7 @@ export class Beacons {
   }
 
   /** rings + pins, screen-space sized so a far war reads at World zoom (H1) */
-  draw(ctx: CanvasRenderingContext2D, cam: Camera, now: number): void {
+  draw(ctx: CanvasRenderingContext2D, cam: Camera, now: number, icons?: MapIconAtlas): void {
     for (const b of this.inWindow.values()) {
       const [sx, sy] = cam.worldToScreen(b.ev.x + 0.5, b.ev.y + 0.5);
       const onScreen = sx >= -30 && sy >= -30 && sx <= cam.viewW + 30 && sy <= cam.viewH + 30;
@@ -84,15 +85,20 @@ export class Beacons {
       ctx.strokeStyle = meta.color;
       ctx.lineWidth = 1.5;
       ctx.beginPath(); ctx.arc(sx, sy, 10, 0, 7); ctx.stroke();
-      ctx.font = '12px system-ui';
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(meta.glyph, sx, sy + 1);
-      ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+      const cell = icons?.index[`g:${meta.cat}`];
+      if (cell && icons) {
+        ctx.drawImage(icons.canvas as CanvasImageSource, cell.x, cell.y, ICON_W, ICON_H, sx - 11, sy - 9, 22, 18);
+      } else {
+        ctx.font = '12px system-ui';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(meta.glyph, sx, sy + 1);
+        ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+      }
     }
   }
 
   /** edge-of-screen arrow chips toward recent off-viewport beacons (H2) */
-  drawArrows(ctx: CanvasRenderingContext2D, cam: Camera, now: number): void {
+  drawArrows(ctx: CanvasRenderingContext2D, cam: Camera, now: number, icons?: MapIconAtlas): void {
     this.arrowHits = [];
     const pending: LiveBeacon[] = [];
     for (const b of this.inWindow.values()) {
@@ -117,9 +123,15 @@ export class Beacons {
       ctx.strokeStyle = meta.color;
       ctx.lineWidth = 2;
       ctx.beginPath(); ctx.arc(ax, ay, 13, 0, 7); ctx.stroke();
-      ctx.font = '13px system-ui';
+      const gcell = icons?.index[`g:${meta.cat}`];
+      if (gcell && icons) {
+        ctx.drawImage(icons.canvas as CanvasImageSource, gcell.x, gcell.y, ICON_W, ICON_H, ax - 11, ay - 9, 22, 18);
+      } else {
+        ctx.font = '13px system-ui';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(meta.glyph, ax, ay + 1);
+      }
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(meta.glyph, ax, ay + 1);
       // direction tick just outside the chip
       ctx.fillStyle = meta.color;
       ctx.beginPath();
