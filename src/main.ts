@@ -520,7 +520,8 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
     const span = tlSpan();
     const spanYears = span.y1 - span.y0;
     const minSev = spanYears > 400 ? 4 : spanYears > 150 ? 3 : 0;
-    const BUCKET = 5;
+    // V1 density v3: buckets widen with world age so ancient worlds still read
+    const BUCKET = Math.min(14, 5 + Math.floor(spanYears / 250) * 3);
     const buckets = new Map<number, { top: MajorEvent; count: number }>();
     for (const ev of majors) {
       if (ev.severity < minSev) continue;
@@ -791,6 +792,7 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
       msg.entry.choice.split('(')[0].replace(/_/g, ' ').toLowerCase(),
       isWar,
       () => showCouncil(msg),
+      'council',
     );
     // auto-pause on war declarations at 1× (07: default ON at 1×, OFF at 16×)
     if (isWar && speed === 1 && !paused) {
@@ -805,17 +807,33 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
     toast(`${meta.glyph} ${ev.text.replace(/^Y\d+: /, '')}`, 'click to look', meta.cat === 'war', () => {
       flyTarget = { x: ev.x, y: ev.y };
       worker.postMessage({ t: 'chain', eventId: ev.id });
-    });
+    }, meta.cat);
   };
 
-  function toast(title: string, sub: string, war: boolean, onClick: () => void): void {
+  function toast(title: string, sub: string, war: boolean, onClick: () => void, cat = ''): void {
+    // V1 coalescing: same-category toasts within 5s merge into a counter;
+    // the map is the show, not the toast pile (doc 13 V1)
+    if (cat) {
+      const prev = [...toastStack.children].find(el =>
+        (el as HTMLElement).dataset.cat === cat &&
+        performance.now() - Number((el as HTMLElement).dataset.born) < 5000) as HTMLElement | undefined;
+      if (prev) {
+        const n = Number(prev.dataset.n ?? 1) + 1;
+        prev.dataset.n = String(n);
+        prev.querySelector('b')!.textContent = `${n} ${cat} moments`;
+        (prev.querySelector('span') as HTMLElement).textContent = `latest: ${title.slice(0, 60)}`;
+        return;
+      }
+    }
     const el = document.createElement('div');
     el.className = `toast${war ? ' war' : ''}`;
+    el.dataset.cat = cat;
+    el.dataset.born = String(performance.now());
     el.innerHTML = `<b>${title}</b><br><span style="color:#9badb7">${sub}</span>`;
     el.addEventListener('click', () => { onClick(); el.remove(); });
     toastStack.appendChild(el);
     setTimeout(() => el.remove(), 9000);
-    while (toastStack.children.length > 4) toastStack.firstChild?.remove();
+    while (toastStack.children.length > 3) toastStack.firstChild?.remove();
   }
 
   function showCouncil(msg: any): void {
@@ -1057,8 +1075,10 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
       chip.className = 'fhud';
       chip.title = `${f.name} · click for charts`;
       const trend = pop > popPrev ? '<span class="up">▲</span>' : pop < popPrev ? '<span class="down">▼</span>' : '';
+      const live = latest.factions.filter(x => !x.extinct).length;
       chip.innerHTML = `<span class="sw" style="background:${FACTION_COLORS[f.id]}"></span>` +
-        `<span>${f.name.split(' ')[0]}</span><b>${pop}</b>${trend}` +
+        (live > 5 ? `<b>${pop}</b>${trend}` :
+          `<span>${f.name.split(' ')[0]}</span><b>${pop}</b>${trend}`) +
         `${atWar.has(f.id) ? '⚔' : ''}${pop > 0 && pop < 50 ? '💀' : ''}`;
       // 50y pop sparkline
       const spark = document.createElement('canvas');
@@ -1080,18 +1100,35 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
     }
   }
 
-  // ---- war status strip (11 §A3) ----
+  // ---- war status strip (11 §A3, V1: ONE row, wars as tabs) ----
   const warStrip = document.getElementById('war-strip')!;
   let warStripKey = '';
+  let warTab = 0;
   function renderWarStrip(): void {
     if (!latest) return;
     const wars = latest.wars ?? [];
     const squads = latest.squads ?? [];
-    const key = wars.map(w => `${w.id}:${(w as any).captureProgress ?? 0}:${squads.length}`).join(',');
+    const key = wars.map(w => `${w.id}:${(w as any).captureProgress ?? 0}:${squads.length}`).join(',') + `#${warTab}`;
     if (key === warStripKey) return;
     warStripKey = key;
     warStrip.innerHTML = '';
-    for (const w of wars) {
+    if (wars.length === 0) return;
+    if (warTab >= wars.length) warTab = 0;
+    // tab chips for the other wars: the map stays visible (doc 13 V1)
+    if (wars.length > 1) {
+      const tabs = document.createElement('div');
+      tabs.style.cssText = 'display:flex;gap:4px;justify-content:center';
+      wars.forEach((w, i) => {
+        const chip = document.createElement('button');
+        chip.className = 'ctl';
+        chip.style.cssText = `font-size:11px;padding:1px 8px;${i === warTab ? 'background:#d9576333;border-color:#d95763' : ''}`;
+        chip.textContent = `⚔ ${(w as any).name ?? latest!.factions?.[w.attacker]?.name.split(' ')[0] ?? i}`;
+        chip.addEventListener('click', () => { warTab = i; warStripKey = ''; renderWarStrip(); });
+        tabs.appendChild(chip);
+      });
+      warStrip.appendChild(tabs);
+    }
+    for (const w of [wars[warTab]]) {
       const an = latest.factions?.[w.attacker]?.name ?? '?';
       const dn = latest.factions?.[w.defender]?.name ?? '?';
       const aTroops = squads.filter(q => q.factionId === w.attacker).reduce((a, q) => a + q.n, 0);

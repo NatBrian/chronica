@@ -37,7 +37,8 @@
     body.postcard #war-strip { display: none !important; }
     /* per-faction HUD chips (11 §I2): the island's pulse, always on */
     #hud-factions { position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
-      display: flex; gap: 6px; z-index: 10; }
+      display: flex; gap: 6px; z-index: 10; flex-wrap: wrap; max-width: 62vw;
+      justify-content: center; }
     .fhud { background: #14141fcc; border: 1px solid var(--border); border-radius: 6px;
       padding: 3px 8px; font-size: 12px; cursor: pointer; display: flex; align-items: center;
       gap: 5px; font-variant-numeric: tabular-nums; }

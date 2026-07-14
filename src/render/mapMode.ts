@@ -258,11 +258,14 @@ export class MapMode {
       ctx.fillText(m.kind === 'dragon' ? '🐉' : m.kind === 'troll' ? '🧌' : '🐺', sx, sy);
     }
 
-    // settlement icons + always-on labels (11 §D1)
+    // settlement icons + labels (11 §D1; V1 declutter: priority + collision)
     const S = 2;                                  // icon pixel scale (screen-space)
     ctx.font = '600 11px system-ui';
     ctx.textBaseline = 'top';
-    for (const st of snap.settlements) {
+    const placedLabels: { x: number; y: number; w: number; h: number }[] = [];
+    const liveCount = snap.settlements.filter(s2 => !s2.razed).length;
+    const sorted = [...snap.settlements].sort((a, b) => b.pop - a.pop);
+    for (const st of sorted) {
       if (st.razed) continue;
       const [sx, sy] = cam.worldToScreen(st.x + 0.5, st.y + 0.5);
       if (sx < -80 || sy < -80 || sx > cam.viewW + 80 || sy > cam.viewH + 80) continue;
@@ -292,23 +295,29 @@ export class MapMode {
         ctx.fillRect(Math.round(sx) - 1, iy - 15, 2, 4);
         ctx.fillRect(Math.round(sx) + 2, iy - 14, 2, 3);
       }
-      // name label chip + pop badge, always on at far zoom
-      const label = st.name;
-      const wLabel = ctx.measureText(label).width;
-      const pop = String(st.pop);
+      // label priority (V1): capitals + big towns always; villages while the
+      // screen stays quiet; hamlets never (icon + hover cover them)
+      const isCapital = snap.factions[st.factionId]?.capital === st.id;
+      if (!isCapital && st.pop < 90) continue;
+      if (!isCapital && st.pop < 200 && liveCount > 12) continue;
+      const label = `${st.name} · ${st.pop}`;
       ctx.font = '600 11px system-ui';
-      const lx = Math.round(sx - wLabel / 2), ly = iy + ih + 2;
+      const wLabel = ctx.measureText(label).width;
+      const lx = Math.round(sx - wLabel / 2);
+      let ly = iy + ih + 2;
+      // collision nudge: try below, then two steps up; still colliding = skip
+      const collides = (yy: number) => placedLabels.some(r =>
+        lx - 4 < r.x + r.w && lx + wLabel + 4 > r.x && yy - 2 < r.y + r.h && yy + 13 > r.y);
+      if (collides(ly)) ly = iy - 18;
+      if (collides(ly)) ly = iy + ih + 18;
+      if (collides(ly)) continue;
+      placedLabels.push({ x: lx - 4, y: ly - 2, w: wLabel + 8, h: 15 });
       ctx.fillStyle = '#14141fc8';
       ctx.fillRect(lx - 4, ly - 2, wLabel + 8, 15);
       ctx.fillStyle = fcol;
       ctx.fillRect(lx - 4, ly - 2, 2, 15);
       ctx.fillStyle = '#cbdbfc';
       ctx.fillText(label, lx, ly);
-      ctx.font = '10px system-ui';
-      ctx.fillStyle = '#9badb7';
-      const wPop = ctx.measureText(pop).width;
-      ctx.fillText(pop, Math.round(sx - wPop / 2), ly + 15);
-      ctx.font = '600 11px system-ui';
     }
 
     // armies as banner icons + soldier count (11 §D1)
