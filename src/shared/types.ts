@@ -163,7 +163,11 @@ export interface DecisionRequest {
 export interface DecisionDigest {
   persona: {
     name: string; race: string; traits: string[]; age: number; yearsRuled: number;
-    god: string; culture: { aggression: number; piety: number; wanderlust: number };
+    god: string;
+    culture: {
+      aggression: number; piety: number; wanderlust: number;
+      doctrine?: string; values?: string[];
+    };
   };
   memories: string[];
   grudges: { faction: string; weight: number; why: string }[];

@@ -7,6 +7,7 @@ import { RACE_TABLE } from './raceData';
 import { spawnPawn } from './pawnOps';
 import { emitEvent } from './events/events';
 import { TileFlag, isPassable } from './world/map';
+import { rollCulture, rollTraits } from './rules/identity';
 
 export function genesis(seed: number, config: WorldConfig): SimState {
   const s = createEmptyState(seed, config);
@@ -31,7 +32,10 @@ export function genesis(seed: number, config: WorldConfig): SimState {
       name: '',
       god: godName(race, rng),
       leaderId: -1,
-      culture: { aggression: rs.aggression, piety: rs.piety, wanderlust: rs.wanderlust },
+      culture: {
+        aggression: rs.aggression, piety: rs.piety, wanderlust: rs.wanderlust,
+        ...rollCulture(race, rng),
+      },
       equipmentTier: 1000,
       extinct: false,
       reserveStores: false,
@@ -98,6 +102,7 @@ export function genesis(seed: number, config: WorldConfig): SimState {
       recentChoices: [],
       kills: 0,
       parentNamedId: -1,
+      traits: rollTraits(seed, s.named.length),
     };
     if (leaderPawn >= 0) {
       s.pawns.namedId[leaderPawn] = king.id;

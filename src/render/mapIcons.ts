@@ -121,6 +121,86 @@ export function popTier(pop: number): 0 | 1 | 2 | 3 {
   return pop >= 400 ? 3 : pop >= 220 ? 2 : pop >= 90 ? 1 : 0;
 }
 
+// ---- building sprites (M10, 11 §B1): tiered, race-flavored silhouettes ----
+// kinds: 0 house, 1 granary, 2 workshop, 3 temple, 5 wall (4 farm = tiles)
+
+const GRANARY = [
+  '..kkkk..',
+  '.krrrrk.',
+  '.krrrrk.',
+  '.kwwwwk.',
+  '.kwwwwk.',
+  '.kwddwk.',
+  '.kwwwwk.',
+  '.kkkkkk.',
+];
+const WORKSHOP = [
+  '.....k..',
+  '.kkkkk..',
+  '.kwwwwk.',
+  '.kwbbwk.',
+  '.kwwwwk.',
+  '.kbbbbk.',
+  '.kkkkkk.',
+];
+const TEMPLE = [
+  '..rrrr..',
+  '.rrrrrr.',
+  '.kwkwkw.',
+  '.kwkwkw.',
+  '.kwkwkw.',
+  '.kkkkkk.',
+];
+const WALLSEG = [
+  'w.w.w.w.',
+  'wwwwwwww',
+  'wWWWWWWw',
+  'wWWWWWWw',
+  'wwwwwwww',
+];
+const SCAFFOLD = [
+  'b..b..b.',
+  '.b..b..b',
+  'b..b..b.',
+  '.b..b..b',
+  'b..b..b.',
+];
+
+export const BUILDING_CELL = 8;
+
+export interface BuildingAtlas {
+  canvas: HTMLCanvasElement | OffscreenCanvas;
+  /** `${race}:${kind}` plus 'scaffold' */
+  index: Record<string, { x: number; y: number }>;
+}
+
+export function bakeBuildingAtlas(): BuildingAtlas {
+  const KINDS = [0, 1, 2, 3, 5];
+  const W = (KINDS.length * 4 + 1) * BUILDING_CELL, H = BUILDING_CELL;
+  const canvas = typeof OffscreenCanvas !== 'undefined'
+    ? new OffscreenCanvas(W, H)
+    : Object.assign(document.createElement('canvas'), { width: W, height: H });
+  const ctx = canvas.getContext('2d') as CanvasRenderingContext2D;
+  const img = ctx.createImageData(W, H);
+  const index: Record<string, { x: number; y: number }> = {};
+  let col = 0;
+  for (let race = 0; race < 4; race++) {
+    const r = race as Race;
+    for (const kind of KINDS) {
+      const ox = col * BUILDING_CELL;
+      const rows = kind === 0 ? HUT[r] : kind === 1 ? GRANARY
+        : kind === 2 ? WORKSHOP : kind === 3 ? TEMPLE : WALLSEG;
+      stamp(img, rows, ox + (kind === 0 ? 1 : 0), kind === 0 ? 2 : 0, r);
+      index[`${race}:${kind}`] = { x: ox, y: 0 };
+      col++;
+    }
+  }
+  stamp(img, SCAFFOLD, col * BUILDING_CELL, 1, Race.Human);
+  index['scaffold'] = { x: col * BUILDING_CELL, y: 0 };
+  ctx.putImageData(img, 0, 0);
+  return { canvas, index };
+}
+
 export function bakeMapIcons(): MapIconAtlas {
   const cols = 4 * 4 + 1;                     // race × tier + swords
   const W = cols * ICON_W, H = ICON_H;

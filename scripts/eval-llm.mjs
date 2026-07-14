@@ -65,6 +65,21 @@ FIXTURES.push({
     ['TAKE_TRIBUTE', 'SHIFT_BORDER', 'VASSALIZE', 'RAZE']),
   expectMemoryGrounding: true,
 });
+// culture voice probe (M10, P6.1): same brink, two creeds; the reasoning
+// should echo at least one of the people's value keywords
+for (const [race, values, doctrine] of [
+  ['dwarf', ['grudges', 'iron', 'the ledger'], 'defensive'],
+  ['orc', ['strength', 'spoils', 'loud dying'], 'raider'],
+]) {
+  const dig = fixture(race,
+    ['Y31: they refused our grain tribute', 'Y29: my brother died raiding Elmwood'],
+    [{ faction: 'Elmwood Court (1)', weight: 9, why: 'tribute refusals; brother slain' }],
+    { year: 43, season: 'autumn', foodStores: '4 months', armyStrength: 'strong', population: 300, settlements: 2, enemyEstimates: { 'Elmwood Court (1)': 'weaker than us' }, activeTreaties: [], recentEvents: [] },
+    ['DECLARE_WAR(1)', 'DEMAND_TRIBUTE(1)', 'SEND_GIFT(1)', 'CONSOLIDATE']);
+  dig.persona.culture = { aggression: 140, piety: 100, wanderlust: 100, values, doctrine };
+  FIXTURES.push({ name: `${race}-culture-voice`, digest: dig, expectCultureVoice: true });
+}
+
 // entropy probe: neutral council, run 6×; flag >50% single-action dominance
 const entropyFixture = fixture('human',
   ['Y80: a quiet decade of good harvests'],
@@ -74,11 +89,16 @@ const entropyFixture = fixture('human',
 
 function prompt(digest) {
   const d = digest;
+  const culture = d.persona.culture ?? {};
   const system = [
     `You are ${d.persona.name}, ${d.persona.race} ruler, age ${d.persona.age}, ${d.persona.yearsRuled} years on the throne.`,
     `Traits: ${d.persona.traits.join(', ')}. Your god: ${d.persona.god}.`,
+    // culture-voiced kings (M10, P6.1): mirrors src/brain/brain.ts
+    culture.values?.length
+      ? `Your people hold to: ${culture.values.join(', ')}. In war they are ${culture.doctrine ?? 'cautious'}. Let these ways shape your reasoning.`
+      : '',
     `Rules: choose EXACTLY ONE option from the list, verbatim. Reason in character, max 80 words.`,
-  ].join('\n');
+  ].filter(Boolean).join('\n');
   const user = JSON.stringify({
     memories: d.memories, grudges: d.grudges, situation: d.situation,
     options: d.options,
@@ -128,8 +148,11 @@ for (const f of FIXTURES) {
     const validChoice = f.digest.options.includes(res.choice);
     const words = (res.reasoning ?? '').split(/\s+/).length;
     const memOk = !f.expectMemoryGrounding || grounded(res.reasoning ?? '', f.digest);
-    const ok = validChoice && words <= 110 && memOk;
-    console.log(`${ok ? '✓' : '✗'} ${f.name}: ${res.choice} (${words}w${memOk ? '' : ', NOT memory-grounded'})`);
+    const cultureOk = !f.expectCultureVoice ||
+      (f.digest.persona.culture?.values ?? []).some(v =>
+        (res.reasoning ?? '').toLowerCase().includes(v.split(' ').pop().toLowerCase()));
+    const ok = validChoice && words <= 110 && memOk && cultureOk;
+    console.log(`${ok ? '✓' : '✗'} ${f.name}: ${res.choice} (${words}w${memOk ? '' : ', NOT memory-grounded'}${cultureOk ? '' : ', NO culture voice'})`);
     if (!ok) { fail++; console.log(`   reasoning: ${res.reasoning}`); }
     else pass++;
   } catch (e) {

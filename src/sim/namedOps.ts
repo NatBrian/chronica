@@ -4,6 +4,7 @@ import { EventType } from '../shared/types';
 import { NamedCharacter, PawnFlag, SimState } from './state';
 import { fullName } from './world/names';
 import { emitEvent, yearOf } from './events/events';
+import { rollTraits } from './rules/identity';
 
 export function namedCap(s: SimState): number {
   // breathing cap (03): war/crisis raises the ceiling
@@ -35,6 +36,7 @@ export function promoteNamed(
     recentChoices: [],
     kills: 0,
     parentNamedId: -1,
+    traits: rollTraits(s.seed, s.named.length),
   };
   s.named.push(nc);
   s.namedActive++;

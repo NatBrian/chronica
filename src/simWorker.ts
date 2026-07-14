@@ -131,6 +131,10 @@ function receiveProse(msg: { chapterId: number; title: string; paragraphs: strin
     s.factions.map(f => f.god),
     s.islandName,
   );
+  // war names are legal entities (M10, P6.2): "the Tribute War" may recur
+  for (const f2 of facts) {
+    if (typeof f2.data?.warName === 'string') known.push(f2.data.warName);
+  }
   const prose = msg.paragraphs.join('\n');
   const check = validateChapter({
     prose, facts, knownNames: known,
@@ -235,7 +239,7 @@ function snapshotMsg() {
     })),
     wars: s.wars.map(w => ({
       id: w.id, attacker: w.attacker, defender: w.defender,
-      objective: w.objective, startTick: w.startTick,
+      objective: w.objective, startTick: w.startTick, name: w.name,
       captureProgress: w.captureProgress ?? 0,
       targetSettlement: w.targetSettlement,
     })),
@@ -534,7 +538,7 @@ self.onmessage = (e: MessageEvent) => {
             longevity: p.longevity[i], charisma: p.charisma[i],
           },
           paired: p.pairId[i] >= 0,
-          named: named ? { name: named.name, role: named.role, bio: named.bio, memories: named.memories.map(m => m.text) } : null,
+          named: named ? { name: named.name, role: named.role, bio: named.bio, memories: named.memories.map(m => m.text), traits: named.traits ?? [] } : null,
         },
       });
       break;
@@ -620,6 +624,21 @@ self.onmessage = (e: MessageEvent) => {
             factionName: sim!.state.factions[en.factionId]?.name ?? '?',
           })),
       });
+      break;
+    }
+    case 'farms': {
+      // crop stages for the living-world layer (M10, 11 §B2), polled ~0.5Hz
+      if (!sim) break;
+      const sf = sim.state;
+      const N = sf.map.size;
+      const out: number[] = [];
+      for (const st of sf.settlements) {
+        if (st.razed) continue;
+        for (const plot of st.farmPlots) {
+          out.push(plot % N, (plot / N) | 0, sf.map.crop[plot]);
+        }
+      }
+      post({ t: 'farms', xyStage: out });
       break;
     }
     case 'debugExpansion': {

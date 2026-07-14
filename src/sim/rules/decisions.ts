@@ -228,14 +228,16 @@ function describeArmy(s: SimState, fid: number): string {
 
 function personaTraits(s: SimState, king: NamedCharacter | null): string[] {
   if (!king) return ['collective', 'cautious'];
-  const t: string[] = [];
+  // the rolled character traits lead (M10, P2.2: verbatim in the prompt);
+  // earned epithets follow
+  const t: string[] = [...(king.traits ?? [])];
   const f = s.factions[king.factionId];
-  if (f.culture.aggression > 140) t.push('aggressive');
-  else if (f.culture.aggression < 90) t.push('patient');
-  if (f.culture.piety > 130) t.push('devout');
   if (king.kills > 3) t.push('battle-scarred');
   if (king.pawnIdx >= 0 && s.pawns.charisma[king.pawnIdx] > 160) t.push('charismatic');
-  if (t.length === 0) t.push('pragmatic');
+  if (t.length === 0) {
+    if (f.culture.aggression > 140) t.push('aggressive');
+    else t.push('pragmatic');
+  }
   return t.slice(0, 3);
 }
 
@@ -502,23 +504,43 @@ export function declareWar(
   const att = s.factions[attacker], def = s.factions[defender];
   const grudge = s.pairs[pk].grudge;
   const why = s.pairs[pk].ledger.filter(l => l.delta < 0).slice(-1)[0]?.why ?? 'old grudges';
+  const warName = nameWar(why, def.name);
   const ev = emitEvent(s, {
     type: EventType.WarDeclared,
     actors: att.leaderId >= 0 ? [att.leaderId] : [],
     factions: [attacker, defender],
     x: s.settlements[att.capital]?.x ?? 0, y: s.settlements[att.capital]?.y ?? 0,
     causes, severity: 4,
-    text: `Y${yearOf(s.tick)}: ${att.name} declares war on ${def.name}: ${why}.`,
-    data: { grudge },
+    text: `Y${yearOf(s.tick)}: ${att.name} declares war on ${def.name}: ${why}. Men will call it ${warName}.`,
+    data: { grudge, warName },
   });
   s.wars.push({
     id: s.nextEntityId++,
     attacker, defender, objective,
+    name: warName,
     startTick: s.tick,
     exhaustionA: 0, exhaustionB: 0,
     causeEventIds: [ev.id, ...causes],
     targetSettlement: pickWarTarget(s, attacker, defender),
   });
+}
+
+/** Diegetic war name from the casus belli (M10, P6.2 template tier).
+ *  WorldBox uses grammar tables; ours names wars from actual facts. */
+export function nameWar(why: string, defenderName: string): string {
+  const short = defenderName.replace(/ (Kingdom|Court|Hold|Horde)$/, '');
+  if (why.includes('tribute')) return 'the Tribute War';
+  if (why.includes('hunting grounds')) return 'the War of the Hunting Grounds';
+  if (why.includes('livestock')) return 'the War of Stolen Herds';
+  if (why.includes('poisoned well')) return 'the Poisoned-Well War';
+  if (why.includes('timber')) return 'the Timber War';
+  if (why.includes('insult')) return 'the War of the Insult';
+  if (why.includes('bride')) return 'the Broken-Promise War';
+  if (why.includes('razed')) return `the Vengeance War for ${short}`;
+  if (why.includes('plundered')) return 'the Plunder War';
+  if (why.includes('rebellion')) return `the War of Free ${short}`;
+  if (why.includes('embargo')) return 'the Closed-Roads War';
+  return `the ${short} War`;
 }
 
 export function pickWarTarget(s: SimState, attacker: number, defender: number): number {

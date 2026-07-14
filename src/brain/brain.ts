@@ -11,13 +11,18 @@ export interface Brain {
 
 export function decisionPrompt(req: DecisionRequest): { system: string; user: string } {
   const d = req.digest;
+  const culture = d.persona.culture;
   const system = [
     `You are ${d.persona.name}, ${d.persona.race} ruler, age ${d.persona.age}, ${d.persona.yearsRuled} years on the throne.`,
     `Traits: ${d.persona.traits.join(', ')}. Your god: ${d.persona.god}.`,
+    // culture-voiced kings (M10, P6.1): the people's creed colors every word
+    culture.values?.length
+      ? `Your people hold to: ${culture.values.join(', ')}. In war they are ${culture.doctrine ?? 'cautious'}. Let these ways shape your reasoning.`
+      : '',
     raceVoice(d.persona.race),
     `Rules: choose EXACTLY ONE option from the list, verbatim. Reason in character, max 80 words.`,
     `War is stated plainly, never relished. No gore.`,
-  ].join('\n');
+  ].filter(Boolean).join('\n');
   const user = JSON.stringify({
     memories: d.memories,
     grudges: d.grudges,

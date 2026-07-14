@@ -113,6 +113,9 @@ export interface FactionPairState {
 export interface War {
   id: number;
   attacker: number; defender: number;
+  /** diegetic name from the casus belli (M10, P6.2); template now, the
+   *  chronicler's LLM may later retitle chapters that reference it */
+  name?: string;
   objective: 'raid' | 'conquer' | 'burn';
   startTick: number;
   exhaustionA: number; exhaustionB: number;
@@ -131,7 +134,13 @@ export interface Faction {
   name: string;
   god: string;
   leaderId: number;           // named character id, -1 none
-  culture: { aggression: number; piety: number; wanderlust: number };
+  culture: {
+    aggression: number; piety: number; wanderlust: number;
+    /** M10 identity lite: rolled at genesis, drifts on rebellion (P2.1) */
+    doctrine?: 'raider' | 'defensive' | 'expansionist';
+    succession?: 'eldest' | 'renowned' | 'election';
+    values?: string[];
+  };
   equipmentTier: number;      // ×1000 fixed point
   extinct: boolean;
   reserveStores: boolean;
@@ -166,6 +175,8 @@ export interface NamedCharacter {
   recentChoices: string[];
   kills: number;
   parentNamedId: number;
+  /** 2 traits from the M10 table (P2.2); pure fn of (seed, id): rollTraits */
+  traits?: string[];
 }
 
 export interface Squad {

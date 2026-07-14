@@ -7,6 +7,7 @@ import { PendingDecision } from '../state';
 import { armyStrength, factionFood, factionPop, dominanceShare } from './decisions';
 import { RACE_TABLE } from '../raceData';
 import { Rng, fnv1a } from '../rng/rng';
+import { doctrineBias, traitBias } from './identity';
 
 export function ruleBrainDecide(s: SimState, req: PendingDecision): DecisionResult {
   // Pure function of (seed, requestId): replay may skip this call entirely
@@ -109,17 +110,33 @@ export function ruleBrainDecide(s: SimState, req: PendingDecision): DecisionResu
       case 'RAZE': score = (pair?.grudge ?? 0) >= 10 ? 26 : -15; break;
       default: score = 0;
     }
+    // identity (M10): culture doctrine + the king's own nature weigh in
+    score += doctrineBias(op, f.culture.doctrine, args);
+    const kingTraits = f.leaderId >= 0 ? s.named[f.leaderId]?.traits ?? [] : [];
+    score += traitBias(op, kingTraits);
     score += rng.int(8);                                   // seeded tie jitter
     if (score > bestScore) { bestScore = score; best = opt; }
   }
 
+  const kingTraits2 = f.leaderId >= 0 ? s.named[f.leaderId]?.traits ?? [] : [];
   return {
     choice: best,
-    reasoning: templateReasoning(kingName, best, f.name),
+    reasoning: templateReasoning(kingName, best, f.name, kingTraits2, f.culture.values),
   };
 }
 
-function templateReasoning(king: string, choice: string, factionName: string): string {
+function templateReasoning(
+  king: string, choice: string, factionName: string,
+  traits: string[] = [], values: string[] = [],
+): string {
+  // identity flavor (M10): instinct kings still sound like themselves
+  const line = templateLine(king, choice, factionName);
+  const nature = traits.length > 0 ? ` So speaks a ${traits[0]} crown.` : '';
+  const creed = values.length > 0 ? ` The ways of ${values[0]} demand no less.` : '';
+  return line + nature + creed;
+}
+
+function templateLine(king: string, choice: string, factionName: string): string {
   const op = choice.split('(')[0];
   const lines: Record<string, string> = {
     DECLARE_WAR: `${king}'s patience is spent. The council of ${factionName} votes for war.`,

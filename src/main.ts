@@ -5,7 +5,7 @@ import { Renderer } from './render/renderer';
 import { RenderMapData, tileColor } from './render/terrain';
 import { mountSeedBrowser, mountLayerViewer, mountSpritePreview } from './ui/devtools';
 import { bakePawnAtlas, actionToJob, SPRITE_W, SPRITE_H, PawnAtlas } from './render/sprites';
-import { bakeMapIcons } from './render/mapIcons';
+import { bakeMapIcons, bakeBuildingAtlas, BUILDING_CELL } from './render/mapIcons';
 import { MapMode } from './render/mapMode';
 import { FACTION_HEX } from './render/palette';
 import { eventMeta, CATEGORY_LIST, CATEGORY_COLOR, EventCategory, eraColor } from './ui/eventMeta';
@@ -117,6 +117,9 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
   const canvas = document.getElementById('world') as HTMLCanvasElement;
   const renderer = new Renderer(canvas, 512);
   const mapIcons = bakeMapIcons();
+  const buildingAtlas = bakeBuildingAtlas();
+  let farms: number[] = [];              // [x, y, stage] triples, polled
+  let lastFarmsPoll = 0;
   let mapMode: MapMode | null = null;
   const beacons = new Beacons();
   let flyTarget: { x: number; y: number } | null = null;
@@ -243,6 +246,9 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
         statsData = msg;
         statsPanel?.setData(msg);
         renderHudChips();
+        break;
+      case 'farms':
+        farms = msg.xyStage;
         break;
       case 'councilLog':
         councilEntries = msg.entries;
@@ -593,7 +599,8 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
       <span class="close" id="insp-close">✕</span>
       <h4>${pawn.named ? pawn.named.name : `${raceNames[pawn.race]} ${pawn.female ? '♀' : '♂'}`}${pawn.child ? ' (child)' : ''}</h4>
       <div class="lbl"><span>${pawn.faction}</span><span>age ${pawn.ageYears}</span></div>
-      ${pawn.named ? `<div class="lbl" style="margin:4px 0"><span>${pawn.named.role}</span></div>` : ''}
+      ${pawn.named ? `<div class="lbl" style="margin:4px 0"><span>${pawn.named.role}</span>` +
+        `<span style="color:#d9a066">${(pawn.named.traits ?? []).join(' · ')}</span></div>` : ''}
       <div style="margin:8px 0 4px;color:#9badb7;font-size:12px">doing: <b style="color:#cbdbfc">${pawn.action}</b></div>
       ${bar('hp', pawn.needs.hp * 2.55)}
       ${bar('hunger', pawn.needs.hunger)}
@@ -951,8 +958,9 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
       const cap = (w as any).captureProgress ?? 0;
       const row = document.createElement('div');
       row.className = 'war-row';
+      const wName = (w as any).name;
       row.innerHTML =
-        `<div class="hd"><span>⚔ <span style="color:${FACTION_COLORS[w.attacker]}">${an}</span>` +
+        `<div class="hd"><span>⚔ ${wName ? `<b style="color:#d9a066">${wName}</b> · ` : ''}<span style="color:${FACTION_COLORS[w.attacker]}">${an}</span>` +
         ` vs <span style="color:${FACTION_COLORS[w.defender]}">${dn}</span></span>` +
         `<span style="color:#9badb7">goal: ${w.objective}</span></div>` +
         (cap > 0 ? `<div class="cap"><div style="width:${cap}%"></div></div>` : '') +
@@ -1582,6 +1590,10 @@ ${parts.join('\n')}</body>`;
       lastStatsPoll = now;
       worker.postMessage({ t: 'stats' });
     }
+    if (now - lastFarmsPoll > 2000 && renderer.camera.pxPerTile >= 8) {
+      lastFarmsPoll = now;
+      worker.postMessage({ t: 'farms' });
+    }
     // war overlay legend tracks wars starting/ending while active
     if (overlayMode === 'war' && latest && (latest.wars?.length ?? 0) !== legendWarCount) {
       legendWarCount = latest.wars?.length ?? 0;
@@ -1601,20 +1613,55 @@ ${parts.join('\n')}</body>`;
     const mapAlpha = px <= 4.5 ? 1 : px >= 12 ? 0 : (12 - px) / 7.5;
     const detailAlpha = 1 - mapAlpha;
     ctx.globalAlpha = detailAlpha;
-    // buildings (M2): simple blocks colored by faction, sized by stage
+    // crops breathe with the year (M10, 11 §B2): furrows → shoots → gold → stubble
+    if (detailAlpha > 0.01 && cam.pxPerTile >= 8) {
+      const px2 = cam.pxPerTile;
+      for (let i = 0; i + 2 < farms.length; i += 3) {
+        const [sx, sy] = cam.worldToScreen(farms[i], farms[i + 1]);
+        if (sx < -px2 || sy < -px2 || sx > cam.viewW || sy > cam.viewH) continue;
+        const stage = farms[i + 2];
+        if (stage === 0) {
+          ctx.fillStyle = '#66393155';
+          ctx.fillRect(Math.round(sx), Math.round(sy + px2 / 3), Math.round(px2), 1);
+          ctx.fillRect(Math.round(sx), Math.round(sy + (px2 * 2) / 3), Math.round(px2), 1);
+        } else {
+          ctx.fillStyle = stage >= 200 ? '#fbf236' : stage >= 100 ? '#6abe30' : '#99e55088';
+          const h = Math.max(1, (px2 * Math.min(200, stage)) / 500);
+          for (let dx = 1; dx < px2 - 1; dx += 3) {
+            ctx.fillRect(Math.round(sx + dx), Math.round(sy + px2 - 1 - h), 1, Math.round(h));
+          }
+        }
+      }
+    }
+    // buildings (M10, 11 §B1): race-flavored sprites at Local zoom,
+    // colored blocks at hybrid zoom, scaffold overlay while under construction
     if (detailAlpha > 0.01 && cam.pxPerTile >= 4) {
+      const useSpritesB = cam.pxPerTile >= 16;
       for (const st of latest.settlements) {
         if (st.razed) continue;
+        const race = latest.factions?.[st.factionId]?.race ?? 0;
         for (const b of st.buildings) {
           const [sx, sy] = cam.worldToScreen(b.x, b.y);
           if (sx < -40 || sy < -40 || sx > cam.viewW + 40 || sy > cam.viewH + 40) continue;
+          if (useSpritesB) {
+            const cell = buildingAtlas.index[`${race}:${b.kind}`];
+            if (cell) {
+              const sc = cam.pxPerTile / BUILDING_CELL;
+              ctx.drawImage(buildingAtlas.canvas as CanvasImageSource,
+                cell.x, cell.y, BUILDING_CELL, BUILDING_CELL,
+                Math.round(sx), Math.round(sy), Math.round(BUILDING_CELL * sc), Math.round(BUILDING_CELL * sc));
+              if (b.stage < 3) {
+                const sca = buildingAtlas.index['scaffold'];
+                ctx.drawImage(buildingAtlas.canvas as CanvasImageSource,
+                  sca.x, sca.y, BUILDING_CELL, BUILDING_CELL,
+                  Math.round(sx), Math.round(sy), Math.round(BUILDING_CELL * sc), Math.round(BUILDING_CELL * sc));
+              }
+              continue;
+            }
+          }
           const sz = Math.max(2, cam.pxPerTile * (b.stage === 3 ? 0.9 : 0.4 + b.stage * 0.15));
           ctx.fillStyle = b.kind === 1 ? '#8a6f30' : b.kind === 2 ? '#847e87' : '#663931';
           ctx.fillRect(Math.round(sx), Math.round(sy), Math.round(sz), Math.round(sz));
-          if (b.stage === 3 && cam.pxPerTile >= 16) {
-            ctx.fillStyle = '#45283c';
-            ctx.fillRect(Math.round(sx + sz / 4), Math.round(sy - sz / 4), Math.round(sz / 2), Math.round(sz / 4));
-          }
         }
       }
     }
@@ -1720,8 +1767,10 @@ ${parts.join('\n')}</body>`;
           const job = variant === 2 ? 'none' : actionToJob(p.action[i]);
           const cell = atlas.index[`${race}:${p.factionId[i]}:${job}:${variant}`];
           if (cell) {
+            // work animation (M10, 11 §B3): laborers bob with their tools
+            const bob = job !== 'none' ? (performance.now() >> 8) & 1 : 0;
             ctx.drawImage(atlas.canvas as CanvasImageSource, cell.x, cell.y, SPRITE_W, SPRITE_H,
-              Math.round(sx - SPRITE_W * spriteScale / 2), Math.round(sy - SPRITE_H * spriteScale + 2),
+              Math.round(sx - SPRITE_W * spriteScale / 2), Math.round(sy - SPRITE_H * spriteScale + 2 - bob),
               SPRITE_W * spriteScale, SPRITE_H * spriteScale);
           }
         } else {

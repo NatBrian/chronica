@@ -55,6 +55,12 @@ export function draftTitle(draft: ChapterDraft, facts: WorldEvent[], factionName
   const y = draft.yearStart === draft.yearEnd ? `Y${draft.yearStart}` : `Y${draft.yearStart}–${draft.yearEnd}`;
   switch (draft.kind) {
     case 'war': {
+      // the war already has a name from its casus belli (M10, P6.2)
+      const declared = facts.find(f => typeof f.data?.warName === 'string');
+      if (declared) {
+        const n = String(declared.data!.warName);
+        return `${n.charAt(0).toUpperCase()}${n.slice(1)} (${y})`;
+      }
       const names = draft.factionIds.map(f => factionNames[f]).filter(Boolean);
       const razed = facts.find(f => f.text.includes('burns'));
       if (razed) return `The Burning (${y})`;

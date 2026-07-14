@@ -14,6 +14,7 @@ import { promoteNamed } from '../namedOps';
 import { RACE_TABLE } from '../raceData';
 import { findExpansionSite, foundSettlement } from '../settlementOps';
 import { computeLoyalty } from '../rules/loyalty';
+import { driftCulture } from '../rules/identity';
 
 export function factionSystem(s: SimState): void {
   if (s.wars.length > 0) s.warTicksThisYear++;
@@ -186,13 +187,18 @@ function checkSuccession(s: SimState, f: Faction): void {
 
   let newKingPawn = heirNamed?.pawnIdx ?? -1;
   if (newKingPawn < 0) {
-    // trait-ranked elder pool: highest charisma adult
+    // elder pool, ranked by the culture's succession rule (M10, P2.1)
+    const rule = f.culture.succession ?? 'election';
     let best = -1, bestScore = -1;
     for (let i = 0; i < s.pawnCount; i++) {
       if (!(s.pawns.flags[i] & PawnFlag.Alive)) continue;
       if (s.pawns.factionId[i] !== f.id) continue;
       if (s.pawns.flags[i] & PawnFlag.Child) continue;
-      const score = s.pawns.charisma[i] * 2 + s.pawns.age[i] / 90;
+      const renown = s.pawns.namedId[i] >= 0 ? s.named[s.pawns.namedId[i]].kills * 40 : 0;
+      const score =
+        rule === 'eldest' ? s.pawns.age[i] * 4 + s.pawns.charisma[i] / 4 :
+        rule === 'renowned' ? renown + s.pawns.strength[i] + s.pawns.charisma[i] :
+        s.pawns.charisma[i] * 2 + s.pawns.age[i] / 90;
       if (score > bestScore) { bestScore = score; best = i; }
     }
     newKingPawn = best;
@@ -390,6 +396,14 @@ function splitFaction(s: SimState, parent: Faction, st: Settlement): void {
       aggression: Math.min(255, parent.culture.aggression + 20),
       piety: parent.culture.piety,
       wanderlust: parent.culture.wanderlust,
+      // rebellion drifts the mother culture (M10, doc 12 Q4: drift is alive)
+      ...driftCulture(
+        {
+          doctrine: parent.culture.doctrine ?? 'defensive',
+          succession: parent.culture.succession ?? 'eldest',
+          values: parent.culture.values ?? [],
+        },
+        parent.race, s.rng.get('culture')),
     },
     equipmentTier: parent.equipmentTier,
     extinct: false,
