@@ -20,7 +20,7 @@ export function emitEvent(s: SimState, opts: EmitOpts): WorldEvent {
     type: opts.type,
     actors: opts.actors ?? [],
     factions: opts.factions ?? [],
-    x: opts.x ?? 0, y: opts.y ?? 0,
+    x: opts.x ?? (s.map.size >> 1), y: opts.y ?? (s.map.size >> 1),
     causes: opts.causes ?? [],
     severity: opts.severity,
     text: opts.text,
