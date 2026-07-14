@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>Chronica</title>
   <style>
     :root {
@@ -12,7 +12,7 @@
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(--text);
       font-family: system-ui, 'Segoe UI', Roboto, sans-serif; font-size: 14px; }
-    #app { display: grid; height: 100vh;
+    #app { display: grid; height: 100vh; height: 100dvh;
       grid-template-columns: 1fr auto;
       grid-template-rows: 1fr auto auto;
       grid-template-areas: "world chronicle" "feed feed" "timeline timeline"; }
@@ -157,7 +157,8 @@
     .chain-node .cy { color: var(--accent); font-weight: 600; }
     .chain-arrow { color: var(--dim); flex-shrink: 0; }
     #timeline-bar { grid-area: timeline; background: var(--panel2); border-top: 1px solid var(--border);
-      padding: 8px 12px; display: flex; align-items: center; gap: 12px; }
+      padding: 8px 12px; display: flex; align-items: center; gap: 12px;
+      padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px)); }
     #timeline { flex: 1; height: 34px; cursor: pointer;
       background: #14141f; border-radius: 4px; }
     #tl-tooltip { position: fixed; bottom: 54px; background: #1c1c2bf2; border: 1px solid var(--border);
@@ -186,7 +187,7 @@
       border-radius: 6px; padding: 6px 10px; font-size: 12px; pointer-events: none;
       display: none; z-index: 26; }
     body.postcard #overlay-legend { display: none !important; }
-    #minimap { position: absolute; bottom: 12px; left: 10px; border: 1px solid var(--border);
+    #minimap { position: absolute; bottom: calc(12px + env(safe-area-inset-bottom, 0px)); left: 10px; border: 1px solid var(--border);
       border-radius: 6px; image-rendering: pixelated; cursor: pointer; background: #14141f; }
     #hint { position: absolute; top: 100px; left: 50%; transform: translateX(-50%);
       background: #1c1c2bf0; border: 1px solid var(--accent); border-radius: 8px;
@@ -199,7 +200,7 @@
       color: var(--text); font-size: 18px; letter-spacing: 2px; text-shadow: 0 1px 4px #000;
       display: none; }
     body.postcard #postcard-caption { display: block; }
-    #toast-stack { position: absolute; bottom: 60px; right: 14px; display: flex;
+    #toast-stack { position: absolute; bottom: calc(60px + env(safe-area-inset-bottom, 0px)); right: 14px; display: flex;
       flex-direction: column; gap: 8px; z-index: 25; }
     .toast { background: #1c1c2bf2; border: 1px solid var(--border); border-left: 3px solid var(--accent);
       border-radius: 6px; padding: 8px 12px; font-size: 13px; max-width: 300px; cursor: pointer;
@@ -263,7 +264,8 @@
     @media (max-width: 768px) {
       #app { grid-template-columns: 1fr; grid-template-rows: 1fr auto auto; grid-template-areas: "world" "feed" "timeline"; }
       #world-wrap { touch-action: none; }
-      #timeline-bar { touch-action: none; gap: 6px; padding: 6px 6px; flex-wrap: wrap; }
+      #timeline-bar { touch-action: none; gap: 6px; padding: 6px 6px; flex-wrap: wrap;
+        padding-bottom: calc(6px + env(safe-area-inset-bottom, 0px)); }
       #chronicle-rail:not(.open) { display: none; }
       #chronicle-rail.open { position: fixed; inset: 0; width: 100%; z-index: 50; border-left: none; border-radius: 0; padding: 8px; }
       body.reading #chronicle-rail.open { width: 100%; }
@@ -275,7 +277,7 @@
       #inspector { right: 4px; left: 4px; width: auto; top: 6px; max-height: 70%; }
       #overlay-bar { bottom: 130px; left: 4px; gap: 3px; }
       #overlay-legend { bottom: 166px; left: 4px; max-width: 200px; font-size: 11px; }
-      #minimap { width: 100px; height: 100px; bottom: 8px; left: 6px; }
+      #minimap { width: 100px; height: 100px; bottom: calc(8px + env(safe-area-inset-bottom, 0px)); left: 6px; }
       #char-sheet { width: 94vw; max-height: 70%; }
       #council-panel { width: 94vw; max-height: 70%; }
       #digest-card { max-width: 92vw; top: 60px; }
@@ -285,7 +287,7 @@
       #timeline-bar button.ctl { font-size: 13px; padding: 6px 10px; min-height: 36px; }
       #year-label { min-width: 60px; font-size: 12px; }
       #replay-badge { font-size: 10px; padding: 1px 6px; }
-      #toast-stack { bottom: 50px; right: 6px; }
+      #toast-stack { bottom: calc(50px + env(safe-area-inset-bottom, 0px)); right: 6px; }
       .toast { max-width: 240px; font-size: 12px; padding: 6px 10px; }
       #search-box { width: 94vw; }
       #landing h1 { font-size: 28px; letter-spacing: 4px; }
