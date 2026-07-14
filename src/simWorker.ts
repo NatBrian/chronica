@@ -1,10 +1,10 @@
 // Sim Web Worker: hosts the deterministic Sim; render thread gets snapshots
 // via transferable buffers (01). This file is NOT /src/sim (it may use timers).
 import { Sim } from './sim/engine';
-import { WorldConfig, defaultConfig, TICKS_PER_YEAR, JournalEntry, Journal, ACTION_NAMES, ChronicleChapter } from './shared/types';
+import { WorldConfig, defaultConfig, TICKS_PER_YEAR, JournalEntry, Journal, ACTION_NAMES, ChronicleChapter, EventType } from './shared/types';
 import { AGE_SCALE, PawnFlag, packSnapshot, snapshot, restore, unpackSnapshot, pairKey } from './sim/state';
 import { scoreOffers } from './sim/systems/utilityAISystem';
-import { detectChapters, detectEra, ChapterDraft, EraDraft } from './chronicle/detector';
+import { detectChapters, detectEra, detectHeroArcs, ChapterDraft, EraDraft } from './chronicle/detector';
 import { loyaltyBreakdown } from './sim/rules/loyalty';
 import { canProsperExpand, crowdPctOf, settlementCapacity } from './sim/settlementOps';
 import { templateChapter, draftTitle } from './chronicle/templates';
@@ -33,6 +33,8 @@ interface ChronicleStore {
   lastEraYear: number;
   drafts: Record<number, ChapterDraft>;   // awaiting LLM prose (template already placed)
   retried: Record<number, boolean>;
+  /** named ids whose life chapter has been written (M11, P3.4) */
+  heroDone?: Record<number, boolean>;
 }
 let chronicle: ChronicleStore = emptyChronicle();
 let lastChronicleCheck = 0;
@@ -71,6 +73,23 @@ function chronicleTick(): void {
       facts: facts.map(f => f.text),
     });
     post({ t: 'chapterToast', title, chapterId: draft.id });
+  }
+
+  // hero arcs (M11, P3.4): a life of renown becomes its own chapter
+  chronicle.heroDone ??= {};
+  const heroArcs = detectHeroArcs(s.named, s.events, chronicle.heroDone, chronicle.nextChapterId);
+  for (const { draft, title } of heroArcs) {
+    chronicle.nextChapterId = Math.max(chronicle.nextChapterId, draft.id + 1);
+    const facts2 = draft.factIds.map(id => s.events.find(e => e.id === id)!).filter(Boolean);
+    chronicle.chapters.push(templateChapter(draft, facts2, title, currentEraName()));
+    chronicle.drafts[draft.id] = draft;
+    post({
+      t: 'chronicleDraft',
+      draft, titleFallback: title, era: currentEraName(),
+      islandName: s.islandName, facts: facts2.map(f => f.text),
+    });
+    post({ t: 'chapterToast', title, chapterId: draft.id });
+    postChronicle();
   }
 
   // era detection every ~60 years
@@ -259,6 +278,10 @@ function snapshotMsg() {
     })),
     caravans: s.caravans.map(c => ({ x: c.x, y: c.y, factionId: c.factionId, purpose: c.purpose })),
     monsters: s.monsters.map(m => ({ x: m.x, y: m.y, kind: m.kind })),
+    // live positions of named characters (M11: follow/favorites camera)
+    namedPos: s.named
+      .filter(n => n.deathTick < 0 && n.pawnIdx >= 0)
+      .map(n => ({ id: n.id, name: n.name, x: s.pawns.x[n.pawnIdx], y: s.pawns.y[n.pawnIdx] })),
     eventsTail: s.events.slice(-40),
     eventCount: s.events.length,
     yearStats: s.yearStats.slice(-1),
@@ -309,7 +332,7 @@ function maybeSendMajors(): void {
     t: 'majorEvents',
     events: majors.map(e => ({
       id: e.id, tick: e.tick, type: e.type, severity: e.severity,
-      x: e.x, y: e.y, text: e.text, causes: e.causes,
+      x: e.x, y: e.y, text: e.text, causes: e.causes, actors: e.actors,
     })),
   });
 }
@@ -538,7 +561,7 @@ self.onmessage = (e: MessageEvent) => {
             longevity: p.longevity[i], charisma: p.charisma[i],
           },
           paired: p.pairId[i] >= 0,
-          named: named ? { name: named.name, role: named.role, bio: named.bio, memories: named.memories.map(m => m.text), traits: named.traits ?? [] } : null,
+          named: named ? { id: named.id, name: named.name, role: named.role, bio: named.bio, memories: named.memories.map(m => m.text), traits: named.traits ?? [], renown: named.renown ?? 0 } : null,
         },
       });
       break;
@@ -626,6 +649,93 @@ self.onmessage = (e: MessageEvent) => {
       });
       break;
     }
+    case 'characterSheet': {
+      // M11, P3.2: portrait data, deeds, mentions, three-generation tree
+      if (!sim) break;
+      const sc = sim.state;
+      const n = sc.named[msg.id as number];
+      if (!n) { post({ t: 'characterSheet', sheet: null }); break; }
+      const kids = sc.named.filter(k => k.parentNamedId === n.id);
+      const parent = n.parentNamedId >= 0 ? sc.named[n.parentNamedId] : null;
+      const grandparent = parent && parent.parentNamedId >= 0 ? sc.named[parent.parentNamedId] : null;
+      const brief = (c: typeof n) => ({
+        id: c.id, name: c.name, role: c.role, dead: c.deathTick >= 0,
+        bornYear: Math.max(0, Math.floor(c.bornTick / TICKS_PER_YEAR)),
+        deathYear: c.deathTick >= 0 ? Math.floor(c.deathTick / TICKS_PER_YEAR) : -1,
+      });
+      post({
+        t: 'characterSheet',
+        sheet: {
+          ...brief(n),
+          factionId: n.factionId,
+          factionName: sc.factions[n.factionId]?.name ?? '?',
+          traits: n.traits ?? [],
+          kills: n.kills,
+          renown: n.renown ?? 0,
+          bio: n.bio,
+          memories: n.memories.map(m => m.text),
+          mentions: sc.events
+            .filter(e => e.actors?.includes(n.id) && e.severity >= 3)
+            .slice(-12)
+            .map(e => ({ id: e.id, tick: e.tick, x: e.x, y: e.y, text: e.text })),
+          family: {
+            grandparent: grandparent ? brief(grandparent) : null,
+            parent: parent ? brief(parent) : null,
+            children: kids.map(brief),
+            grandchildren: kids.flatMap(k => sc.named.filter(g => g.parentNamedId === k.id)).map(brief),
+          },
+        },
+      });
+      break;
+    }
+    case 'records': {
+      // M11, I5: world records derived at panel-open time
+      if (!sim) break;
+      const sr = sim.state;
+      const year = Math.floor(sr.tick / TICKS_PER_YEAR);
+      // longest reign: successive coronations per faction
+      const crowns = sr.events.filter(e => e.type === EventType.Coronation);
+      let reignBest = { name: '', years: 0 };
+      const lastCrown = new Map<number, { tick: number; text: string }>();
+      const consider = (fid: number, endTick: number) => {
+        const c = lastCrown.get(fid);
+        if (!c) return;
+        const yrs = Math.floor((endTick - c.tick) / TICKS_PER_YEAR);
+        if (yrs > reignBest.years) {
+          reignBest = { name: c.text.replace(/^Y\d+: /, '').replace(/ is crowned.*/, ''), years: yrs };
+        }
+      };
+      for (const e of crowns) { consider(e.factions[0], e.tick); lastCrown.set(e.factions[0], { tick: e.tick, text: e.text }); }
+      for (const f of sr.factions) if (!f.extinct) consider(f.id, sr.tick);
+      // oldest living pawn
+      let oldest = 0;
+      for (let i = 0; i < sr.pawnCount; i++) {
+        if (sr.pawns.flags[i] & PawnFlag.Alive) oldest = Math.max(oldest, sr.pawns.age[i]);
+      }
+      // largest city now; longest peace; most crowns in a decade
+      const bigCity = [...sr.settlements].filter(st => !st.razed).sort((a, b) => b.popCache - a.popCache)[0];
+      let peaceBest = 0, run = 0;
+      for (const ysRow of sr.yearStats) { run = ysRow.warTicks === 0 ? run + 1 : 0; peaceBest = Math.max(peaceBest, run); }
+      let crownsBest = 0;
+      for (let i = 0; i < crowns.length; i++) {
+        crownsBest = Math.max(crownsBest, crowns.filter(c =>
+          c.tick >= crowns[i].tick && c.tick < crowns[i].tick + 10 * TICKS_PER_YEAR).length);
+      }
+      const topRenown = [...sr.named].sort((a, b) => (b.renown ?? 0) - (a.renown ?? 0))[0];
+      post({
+        t: 'records',
+        rows: [
+          reignBest.years > 0 ? `Longest reign: ${reignBest.name}, ${reignBest.years} years` : '',
+          topRenown ? `Most renowned: ${topRenown.name} (${topRenown.renown ?? 0} renown, ${topRenown.kills} kills)` : '',
+          `Oldest living soul: ${(oldest * AGE_SCALE / TICKS_PER_YEAR) | 0} years`,
+          bigCity ? `Greatest city: ${bigCity.name}, ${bigCity.popCache} souls` : '',
+          `Longest peace: ${peaceBest} years`,
+          crownsBest > 1 ? `Most crowns in a decade: ${crownsBest}` : '',
+          `The chronicle spans ${year} years and ${sr.events.length} recorded events`,
+        ].filter(Boolean),
+      });
+      break;
+    }
     case 'farms': {
       // crop stages for the living-world layer (M10, 11 §B2), polled ~0.5Hz
       if (!sim) break;
@@ -656,6 +766,42 @@ self.onmessage = (e: MessageEvent) => {
           prosper: canProsperExpand(st),
         })),
       });
+      break;
+    }
+    case 'timelapse': {
+      // M12, P4.3: replay a span, emitting territory keyframes; the live
+      // present is parked exactly like a time-machine scrub and restored after
+      if (!sim) break;
+      const fromY = Math.max(0, msg.fromYear as number);
+      const toY = Math.min(Math.floor((presentPack ? presentTick : sim.state.tick) / TICKS_PER_YEAR), msg.toYear as number);
+      const step = Math.max(1, (msg.stepYears as number) ?? 5);
+      if (!presentPack) {
+        presentTick = sim.state.tick;
+        presentPack = packSnapshot(snapshot(sim.state));
+      }
+      sim.seekToTick(fromY * TICKS_PER_YEAR);
+      for (let y = fromY; y <= toY; y += step) {
+        if (sim.state.tick < y * TICKS_PER_YEAR) {
+          sim.seekToTick(y * TICKS_PER_YEAR);
+        }
+        post({
+          t: 'tlFrame', year: y,
+          settlements: sim.state.settlements.map(st => ({
+            x: st.x, y: st.y, factionId: st.factionId, razed: st.razed, pop: st.popCache,
+          })),
+          battles: sim.state.events
+            .filter(e => (e.type === EventType.BattleFought || e.type === EventType.SettlementRazed) &&
+              Math.abs(e.tick - y * TICKS_PER_YEAR) < step * TICKS_PER_YEAR)
+            .slice(-12).map(e => ({ x: e.x, y: e.y })),
+        });
+      }
+      restore(sim.state, unpackSnapshot(presentPack));
+      presentPack = null;
+      lastMajorCount = -1;
+      lastJournalScan = sim.state.tick;
+      post({ t: 'tlDone' });
+      post({ t: 'seeked', tick: sim.state.tick, inPast: false });
+      sendSnapshot();
       break;
     }
     case 'hash': {

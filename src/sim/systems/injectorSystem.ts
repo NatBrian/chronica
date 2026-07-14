@@ -6,6 +6,7 @@ import { SimState, PawnFlag, effFood, pairKey } from '../state';
 import { emitEvent, yearOf } from '../events/events';
 import { killPawn } from '../pawnOps';
 import { promoteNamed } from '../namedOps';
+import { eraMods } from '../rules/eras';
 import { Biome } from '../../shared/types';
 
 export function injectorSystem(s: SimState): void {
@@ -26,9 +27,12 @@ export function injectorSystem(s: SimState): void {
   const rng = s.rng.get('injectors');
   const year = yearOf(s.tick);
   if (year < 8) return;
+  // world laws + turning ages (M12): disaster pressure dial, percent scale
+  const dScale = ((s.config.disasterScale ?? 100) *
+    eraMods(s.seed, year, s.config.eraWheel ?? true).disaster / 100) | 0;
 
   // wolves: livestock/child threat near forest settlements (~1/8y)
-  if (rng.chance(1, 8) && s.monsters.filter(m => m.kind === 'wolf').length < 2) {
+  if (rng.chance(dScale, 800) && s.monsters.filter(m => m.kind === 'wolf').length < 2) {
     const target = s.settlements.find(st => !st.razed && st.popCache > 60 &&
       nearBiome(s, st.x, st.y, Biome.Forest, 12));
     if (target) {
@@ -46,7 +50,7 @@ export function injectorSystem(s: SimState): void {
   }
 
   // troll: blocks the roads near a settlement (~1/15y), taxes trade
-  if (rng.chance(1, 15) && !s.monsters.some(m => m.kind === 'troll')) {
+  if (rng.chance(dScale, 1500) && !s.monsters.some(m => m.kind === 'troll')) {
     const target = s.settlements.find(st => !st.razed &&
       nearBiome(s, st.x, st.y, Biome.Hills, 14));
     if (target) {
@@ -64,7 +68,7 @@ export function injectorSystem(s: SimState): void {
   }
 
   // dragon: rare (~1/60y), targets the RICHEST granary (wealth attracts trouble)
-  if (year > 40 && rng.chance(1, 60) && !s.monsters.some(m => m.kind === 'dragon')) {
+  if (year > 40 && rng.chance(dScale, 6000) && !s.monsters.some(m => m.kind === 'dragon')) {
     let richest = null as import('../state').Settlement | null;
     for (const st of s.settlements) {
       if (st.razed) continue;
@@ -86,7 +90,7 @@ export function injectorSystem(s: SimState): void {
   }
 
   // plague: starts at the busiest trade hub (~1/25y), rides caravans
-  if (!s.weather.plagueActive && year > 20 && rng.chance(1, 25)) {
+  if (!s.weather.plagueActive && year > 20 && rng.chance(dScale, 2500)) {
     const hub = s.settlements.find(st => !st.razed && st.popCache > 90);
     if (hub) {
       s.weather.plagueActive = true;

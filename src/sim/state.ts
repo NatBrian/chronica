@@ -177,6 +177,8 @@ export interface NamedCharacter {
   parentNamedId: number;
   /** 2 traits from the M10 table (P2.2); pure fn of (seed, id): rollTraits */
   traits?: string[];
+  /** deeds accrue renown (M11, P3.3): drives records + hero-arc chapters */
+  renown?: number;
 }
 
 export interface Squad {

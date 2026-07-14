@@ -1,6 +1,8 @@
-// System 1: season/year rollover + yearly stats collection.
-import { TICKS_PER_YEAR, Season, TICKS_PER_SEASON } from '../../shared/types';
+// System 1: season/year rollover + yearly stats collection + era turns (M12).
+import { TICKS_PER_YEAR, Season, TICKS_PER_SEASON, EventType } from '../../shared/types';
 import { SimState, PawnFlag, YearStats } from '../state';
+import { eraMods, ERA_SPAN_YEARS } from '../rules/eras';
+import { emitEvent } from '../events/events';
 
 export function seasonOf(tick: number): Season {
   return (Math.floor(tick / TICKS_PER_SEASON) % 4) as Season;
@@ -39,4 +41,18 @@ export function calendarSystem(s: SimState): void {
   };
   s.yearStats.push(stats);
   s.warTicksThisYear = 0;
+
+  // the age turns (M12, P4.2): the wheel is announced so the chronicle and
+  // timeline can narrate the macro rhythm the sim is about to feel
+  if ((s.config.eraWheel ?? true) && year % ERA_SPAN_YEARS === 0 && year > 0) {
+    const era = eraMods(s.seed, year, true);
+    const prev = eraMods(s.seed, year - 1, true);
+    if (era.name !== prev.name) {
+      emitEvent(s, {
+        type: EventType.Festival, factions: [], severity: 3,
+        x: s.map.size >> 1, y: s.map.size >> 1,
+        text: `Y${year}: The age turns. Elders say ${era.name} are upon the world.`,
+      });
+    }
+  }
 }

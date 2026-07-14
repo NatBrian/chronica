@@ -33,7 +33,9 @@ export function genesis(seed: number, config: WorldConfig): SimState {
       god: godName(race, rng),
       leaderId: -1,
       culture: {
-        aggression: rs.aggression, piety: rs.piety, wanderlust: rs.wanderlust,
+        // aggression world law (M12): scaled once at genesis, journaled
+        aggression: Math.min(255, (rs.aggression * (config.aggressionScale ?? 100) / 100) | 0),
+        piety: rs.piety, wanderlust: rs.wanderlust,
         ...rollCulture(race, rng),
       },
       equipmentTier: 1000,
@@ -103,6 +105,7 @@ export function genesis(seed: number, config: WorldConfig): SimState {
       kills: 0,
       parentNamedId: -1,
       traits: rollTraits(seed, s.named.length),
+      renown: 10,
     };
     if (leaderPawn >= 0) {
       s.pawns.namedId[leaderPawn] = king.id;

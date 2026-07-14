@@ -94,6 +94,14 @@ export interface WorldConfig {
   keyframeIntervalYears: number;
   namedCapBase: number;
   namedCapMax: number;
+  // world laws (M12, P4.1): set at genesis ONLY, journaled via the header.
+  // Percent scales, 100 = the classic world. Anti-scope holds: never mid-run.
+  aggressionScale: number;
+  fertilityScale: number;
+  lifespanScale: number;
+  disasterScale: number;
+  /** turning ages (M12, P4.2): deterministic era wheel modulating pressure */
+  eraWheel: boolean;
 }
 
 export function defaultConfig(): WorldConfig {
@@ -114,6 +122,11 @@ export function defaultConfig(): WorldConfig {
     keyframeIntervalYears: 10,
     namedCapBase: 30,
     namedCapMax: 50,
+    aggressionScale: 100,
+    fertilityScale: 100,
+    lifespanScale: 100,
+    disasterScale: 100,
+    eraWheel: true,
   };
 }
 

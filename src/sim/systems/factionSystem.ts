@@ -15,6 +15,7 @@ import { RACE_TABLE } from '../raceData';
 import { findExpansionSite, foundSettlement } from '../settlementOps';
 import { computeLoyalty } from '../rules/loyalty';
 import { driftCulture } from '../rules/identity';
+import { eraMods } from '../rules/eras';
 
 export function factionSystem(s: SimState): void {
   if (s.wars.length > 0) s.warTicksThisYear++;
@@ -89,6 +90,9 @@ function maintainDiplomacy(s: SimState, f: Faction): void {
       if (forgive >= 100 || (s.tick / TICKS_PER_YEAR) % 2 === 0) {
         pair.grudge = Math.max(0, pair.grudge - 1);
       }
+      // gentle ages mend fences a little faster (M12, P4.2)
+      const mend = eraMods(s.seed, yearOf(s.tick), s.config.eraWheel ?? true).grudgeMend;
+      if (mend > 0) pair.grudge = Math.max(0, pair.grudge - mend);
     }
     // truce expiry: hostile cools to neutral
     if (pair.diplo === DiploState.Hostile && s.tick > pair.truceUntil + 5 * TICKS_PER_YEAR) {
@@ -237,6 +241,7 @@ function checkSuccession(s: SimState, f: Faction): void {
   } else if (!f.dynasty) {
     f.dynasty = { clan: newClan, foundedTick: s.tick };
   }
+  nc.renown = (nc.renown ?? 0) + 10;   // a crown is renown (M11, P3.3)
   // grudges of the dead pass to heirs via the faction ledger; landmark memory:
   nc.memories.push({
     text: `Y${yearOf(s.tick)}: I took the crown of ${f.name}${king ? ` after ${king.name}` : ''}`,

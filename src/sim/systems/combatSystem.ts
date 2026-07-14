@@ -383,13 +383,14 @@ function promoteHero(s: SimState, winner: Squad, causeEventId: number): void {
     if (!(s.pawns.flags[m] & PawnFlag.Alive)) continue;
     if (s.pawns.namedId[m] >= 0) {
       s.named[s.pawns.namedId[m]].kills++;
+      s.named[s.pawns.namedId[m]].renown = (s.named[s.pawns.namedId[m]].renown ?? 0) + 3;
       continue;
     }
     if (s.pawns.strength[m] > bestScore) { bestScore = s.pawns.strength[m]; best = m; }
   }
   if (best >= 0 && s.rng.get('promotion').chance(1, 3)) {
     const nc = promoteNamed(s, best, 'hero', 'Stood unbroken when the enemy line shattered.', [causeEventId]);
-    if (nc) nc.kills = 2;
+    if (nc) { nc.kills = 2; nc.renown = (nc.renown ?? 0) + 8; }
   }
 }
 

@@ -46,6 +46,7 @@ interface WorkerSnapshot {
   squads?: { x: number; y: number; factionId: number; state: string; n: number; morale?: number; warId?: number }[];
   caravans?: { x: number; y: number; factionId: number; purpose: string }[];
   monsters?: { x: number; y: number; kind: string }[];
+  namedPos?: { id: number; name: string; x: number; y: number }[];
   eventsTail: { text: string; severity: number }[];
 }
 
@@ -82,7 +83,19 @@ function bootApp(): void {
   });
   document.getElementById('btn-begin')!.addEventListener('click', () => {
     landing.style.display = 'none';
-    startWorld({ seed: Number(seedInput.value) | 0 });
+    // world laws (M12, P4.1): genesis-time only, journaled via the header
+    const law = (id: string) => Number((document.getElementById(id) as HTMLSelectElement).value);
+    startWorld({
+      seed: Number(seedInput.value) | 0,
+      config: {
+        aggressionScale: law('law-aggression'),
+        fertilityScale: law('law-fertility'),
+        lifespanScale: law('law-lifespan'),
+        disasterScale: law('law-disaster'),
+        injectors: law('law-injectors') === 1,
+        eraWheel: law('law-erawheel') === 1,
+      },
+    });
   });
 
   // resume list (autosaves)
@@ -113,7 +126,7 @@ function bootApp(): void {
   }).catch(() => {});
 }
 
-function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journal }): void {
+function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journal; config?: Record<string, unknown> }): void {
   const canvas = document.getElementById('world') as HTMLCanvasElement;
   const renderer = new Renderer(canvas, 512);
   const mapIcons = bakeMapIcons();
@@ -123,6 +136,10 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
   let mapMode: MapMode | null = null;
   const beacons = new Beacons();
   let flyTarget: { x: number; y: number } | null = null;
+  // follow + favorites (M11, P3.1)
+  let starred = new Set<number>();
+  let followId = -1;
+  let lastStarScanId = -1;
   const worker = new Worker(new URL('./simWorker.ts', import.meta.url), { type: 'module' });
   const hudYear = document.getElementById('hud-year')!;
   const hudPop = document.getElementById('hud-pop')!;
@@ -195,7 +212,7 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
   } else if (boot.journal) {
     worker.postMessage({ t: 'init', journal: boot.journal, continueLive: true });
   } else {
-    worker.postMessage({ t: 'init', seed: boot.seed });
+    worker.postMessage({ t: 'init', seed: boot.seed, config: boot.config });
   }
 
   worker.onmessage = (e) => {
@@ -208,6 +225,7 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
         document.title = `Chronica: ${msg.islandName}`;
         worldSeed = msg.header.seed;
         saveStore = new SaveStore(idb, `world:${worldSeed}`);
+        starred = new Set(JSON.parse(localStorage.getItem(`chronica.stars.${worldSeed}`) ?? '[]'));
         bakeMinimap();
         applySpeed();
         // timeline v2 era bands need the chronicle's eras from the start
@@ -249,6 +267,19 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
         break;
       case 'farms':
         farms = msg.xyStage;
+        break;
+      case 'characterSheet':
+        renderCharacterSheet(msg.sheet);
+        break;
+      case 'tlFrame':
+        tlFrames.push(msg);
+        seekStatus.textContent = `Filming... Year ${msg.year}`;
+        break;
+      case 'tlDone':
+        void exportTimelapse();
+        break;
+      case 'records':
+        renderRecords(msg.rows);
         break;
       case 'councilLog':
         councilEntries = msg.entries;
@@ -317,6 +348,7 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
     worker.postMessage({ t: 'jumpPresent' });
   });
   document.getElementById('btn-export')!.addEventListener('click', () => worker.postMessage({ t: 'exportJournal' }));
+  document.getElementById('btn-timelapse')!.addEventListener('click', startTimelapse);
   const importFile = document.getElementById('import-file') as HTMLInputElement;
   document.getElementById('btn-import')!.addEventListener('click', () => importFile.click());
   importFile.addEventListener('change', async () => {
@@ -385,6 +417,7 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
   canvas.addEventListener('mousedown', (e) => {
     dragging = true; lastX = downX = e.clientX; lastY = downY = e.clientY;
     flyTarget = null;                       // manual camera cancels auto-pan
+    followId = -1;                          // and releases any followed star
     canvas.classList.add('dragging');
   });
   window.addEventListener('mouseup', (e) => {
@@ -600,7 +633,8 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
       <h4>${pawn.named ? pawn.named.name : `${raceNames[pawn.race]} ${pawn.female ? '♀' : '♂'}`}${pawn.child ? ' (child)' : ''}</h4>
       <div class="lbl"><span>${pawn.faction}</span><span>age ${pawn.ageYears}</span></div>
       ${pawn.named ? `<div class="lbl" style="margin:4px 0"><span>${pawn.named.role}</span>` +
-        `<span style="color:#d9a066">${(pawn.named.traits ?? []).join(' · ')}</span></div>` : ''}
+        `<span style="color:#d9a066">${(pawn.named.traits ?? []).join(' · ')}</span></div>` +
+        `<button class="ctl" id="insp-sheet" style="margin:4px 0">📜 character sheet</button>` : ''}
       <div style="margin:8px 0 4px;color:#9badb7;font-size:12px">doing: <b style="color:#cbdbfc">${pawn.action}</b></div>
       ${bar('hp', pawn.needs.hp * 2.55)}
       ${bar('hunger', pawn.needs.hunger)}
@@ -614,6 +648,98 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
     inspectorEl.style.display = 'block';
     document.getElementById('insp-close')!.addEventListener('click', () => {
       inspectorEl.style.display = 'none';
+    });
+    if (pawn.named) {
+      document.getElementById('insp-sheet')?.addEventListener('click', () => {
+        openCharacterSheet(pawn.named.id);
+      });
+    }
+  }
+
+  // ---- follow + favorites + character sheet (M11, P3.1/P3.2) ----
+  const charSheet = document.getElementById('char-sheet')!;
+
+  function saveStars(): void {
+    localStorage.setItem(`chronica.stars.${worldSeed}`, JSON.stringify([...starred]));
+  }
+  function toggleStar(id: number): void {
+    if (starred.has(id)) starred.delete(id); else starred.add(id);
+    saveStars();
+  }
+  function followCharacter(id: number): void {
+    followId = followId === id ? -1 : id;
+  }
+  /** starred deaths + follow release: scan fresh majors (G3 tier map override) */
+  function watchStarred(): void {
+    if (!latest) return;
+    for (const ev of majors) {
+      if (ev.id <= lastStarScanId) continue;
+      const evActors: number[] = (ev as any).actors ?? [];
+      if (ev.type === 39 /* CharacterDied */ && evActors.some(a => starred.has(a) || a === followId)) {
+        beacons.force(ev as any, performance.now());
+        toast(`★ ${ev.text.replace(/^Y\d+: /, '')}`, 'a favorite has fallen', true, () => {
+          flyTarget = { x: ev.x, y: ev.y };
+          worker.postMessage({ t: 'chain', eventId: ev.id });
+        });
+        if (evActors.includes(followId)) followId = -1;   // camera release
+      }
+    }
+    lastStarScanId = majors.length > 0 ? Math.max(lastStarScanId, majors[majors.length - 1].id) : lastStarScanId;
+    // camera follow (P3.1): track the star; release silently if gone
+    if (followId >= 0) {
+      const pos = (latest as any).namedPos?.find((n: any) => n.id === followId);
+      if (pos) flyTarget = { x: pos.x, y: pos.y };
+      else if (!(latest as any).namedPos) { /* old snapshot; wait */ }
+    }
+  }
+
+  function openCharacterSheet(id: number): void {
+    worker.postMessage({ t: 'characterSheet', id });
+  }
+
+  function renderCharacterSheet(sheet: any): void {
+    if (!sheet) return;
+    const fcol = FACTION_COLORS[sheet.factionId] ?? '#fff';
+    const life = sheet.dead ? `Y${sheet.bornYear} · Y${sheet.deathYear} †` : `born Y${sheet.bornYear}`;
+    const person = (c: any) => c
+      ? `<span class="fam" data-id="${c.id}" style="cursor:pointer;color:${c.dead ? '#9badb7' : '#cbdbfc'}">${c.name}${c.dead ? ' †' : ''} <i style="color:#696a6a">(${c.role})</i></span>`
+      : '<span style="color:#696a6a">unknown</span>';
+    charSheet.innerHTML = `
+      <span class="close" id="cs-close" style="float:right;cursor:pointer;color:#9badb7">✕</span>
+      <h3><span style="color:${fcol}">■</span> ${sheet.name}</h3>
+      <div style="color:#9badb7;font-size:12px">${sheet.role} of ${sheet.factionName} · ${life}</div>
+      <div style="margin:6px 0;font-size:12px">
+        <span style="color:#d9a066">${sheet.traits.join(' · ')}</span>
+        · ⭐ ${sheet.renown} renown · ⚔ ${sheet.kills} kills
+      </div>
+      <div style="margin:6px 0">
+        <button class="ctl" id="cs-star">${starred.has(sheet.id) ? '★ starred' : '☆ star'}</button>
+        ${!sheet.dead ? `<button class="ctl" id="cs-follow">${followId === sheet.id ? '⏹ unfollow' : '🎥 follow'}</button>` : ''}
+      </div>
+      <div style="color:#9badb7;font-size:11px;letter-spacing:1px;margin-top:8px">LINEAGE</div>
+      <div style="font-size:12px;line-height:1.8">
+        ${person(sheet.family.grandparent)} → ${person(sheet.family.parent)} → <b>${sheet.name}</b>
+        ${sheet.family.children.length ? `<br>children: ${sheet.family.children.map(person).join(', ')}` : ''}
+        ${sheet.family.grandchildren.length ? `<br>grandchildren: ${sheet.family.grandchildren.map(person).join(', ')}` : ''}
+      </div>
+      ${sheet.bio.length ? `<div style="color:#9badb7;font-size:11px;letter-spacing:1px;margin-top:8px">DEEDS</div>
+        ${sheet.bio.map((b: string) => `<div style="font-size:12px">· ${b}</div>`).join('')}` : ''}
+      ${sheet.mentions.length ? `<div style="color:#9badb7;font-size:11px;letter-spacing:1px;margin-top:8px">IN THE RECORD</div>
+        ${sheet.mentions.map((m: any) =>
+          `<div class="mention" data-ev="${m.id}" data-x="${m.x}" data-y="${m.y}" style="font-size:12px;cursor:pointer;padding:2px 0">· ${m.text}</div>`).join('')}` : ''}
+    `;
+    charSheet.style.display = 'block';
+    document.getElementById('cs-close')!.addEventListener('click', () => { charSheet.style.display = 'none'; });
+    document.getElementById('cs-star')!.addEventListener('click', () => { toggleStar(sheet.id); renderCharacterSheet(sheet); });
+    document.getElementById('cs-follow')?.addEventListener('click', () => { followCharacter(sheet.id); renderCharacterSheet(sheet); });
+    charSheet.querySelectorAll<HTMLElement>('.fam').forEach(el => {
+      el.addEventListener('click', () => openCharacterSheet(Number(el.dataset.id)));
+    });
+    charSheet.querySelectorAll<HTMLElement>('.mention').forEach(el => {
+      el.addEventListener('click', () => {
+        flyTarget = { x: Number(el.dataset.x), y: Number(el.dataset.y) };
+        worker.postMessage({ t: 'chain', eventId: Number(el.dataset.ev) });
+      });
     });
   }
 
@@ -771,6 +897,7 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
     } else if (tab === 'stats') {
       ensureStatsPanel();
       worker.postMessage({ t: 'stats' });
+      worker.postMessage({ t: 'records' });
     }
     updateReadingMode();
   }
@@ -891,6 +1018,20 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
   let lastStatsPoll = 0;
   const hudFactions = document.getElementById('hud-factions')!;
 
+  /** world records (M11, I5) under the charts */
+  function renderRecords(rows: string[]): void {
+    const tab = document.getElementById('tab-stats')!;
+    let box = document.getElementById('world-records');
+    if (!box) {
+      box = document.createElement('div');
+      box.id = 'world-records';
+      box.style.cssText = 'margin-top:12px;font-size:12px;line-height:1.8';
+      tab.appendChild(box);
+    }
+    box.innerHTML = '<div style="color:#9badb7;font-size:11px;letter-spacing:1px;text-transform:uppercase">WORLD RECORDS</div>' +
+      rows.map(r => `<div>🏆 ${r}</div>`).join('');
+  }
+
   function ensureStatsPanel(): void {
     if (statsPanel) return;
     statsPanel = new StatsPanel(document.getElementById('tab-stats')!, {
@@ -975,6 +1116,92 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
       });
       warStrip.appendChild(row);
     }
+  }
+
+  // ---- timelapse export (M12, P4.3): centuries of border churn as webm ----
+  let tlFrames: any[] = [];
+  let tlRecording = false;
+
+  function startTimelapse(): void {
+    if (!latest || tlRecording) return;
+    const to = latest.inPast ? latest.presentYear : latest.year;
+    const from = Math.max(0, to - 200);
+    tlFrames = [];
+    tlRecording = true;
+    seekStatus.textContent = `Filming ${to - from} years of history...`;
+    seekStatus.style.display = 'block';
+    worker.postMessage({ t: 'timelapse', fromYear: from, toYear: to, stepYears: 5 });
+  }
+
+  async function exportTimelapse(): Promise<void> {
+    tlRecording = false;
+    seekStatus.style.display = 'none';
+    if (tlFrames.length < 2 || !renderer.terrain) return;
+    const size = 360;
+    const cv = document.createElement('canvas');
+    cv.width = size; cv.height = size + 24;
+    const c = cv.getContext('2d')!;
+    const N = renderer.terrain.map.size;
+    const k = size / N;
+    const stream = (cv as any).captureStream(0);
+    const track = stream.getVideoTracks()[0];
+    const rec = new MediaRecorder(stream, { mimeType: 'video/webm' });
+    const chunks: Blob[] = [];
+    rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+    const done = new Promise<void>(res => { rec.onstop = () => res(); });
+    rec.start();
+    for (const fr of tlFrames) {
+      // terrain base
+      c.imageSmoothingEnabled = false;
+      if (minimapBase) c.drawImage(minimapBase, 0, 0, size, size);
+      // territory wash: nearest living settlement claims the block
+      const alive = fr.settlements.filter((st: any) => !st.razed);
+      const B = 8;
+      for (let by = 0; by < N / B; by++) {
+        for (let bx = 0; bx < N / B; bx++) {
+          const cx = bx * B + B / 2, cy = by * B + B / 2;
+          let owner = -1, bestD = 60 * 60;
+          for (const st of alive) {
+            const dx = st.x - cx, dy = st.y - cy;
+            const d = dx * dx + dy * dy;
+            if (d < bestD) { bestD = d; owner = st.factionId; }
+          }
+          if (owner < 0) continue;
+          c.globalAlpha = 0.4;
+          c.fillStyle = FACTION_COLORS[owner] ?? '#fff';
+          c.fillRect(bx * B * k, by * B * k, B * k + 1, B * k + 1);
+          c.globalAlpha = 1;
+        }
+      }
+      for (const st of alive) {
+        c.fillStyle = FACTION_COLORS[st.factionId] ?? '#fff';
+        c.fillRect(st.x * k - 2, st.y * k - 2, 4, 4);
+      }
+      for (const bt of fr.battles ?? []) {
+        c.strokeStyle = '#d95763';
+        c.lineWidth = 2;
+        c.beginPath();
+        c.moveTo(bt.x * k - 3, bt.y * k - 3); c.lineTo(bt.x * k + 3, bt.y * k + 3);
+        c.moveTo(bt.x * k + 3, bt.y * k - 3); c.lineTo(bt.x * k - 3, bt.y * k + 3);
+        c.stroke();
+      }
+      c.fillStyle = '#14141f';
+      c.fillRect(0, size, size, 24);
+      c.fillStyle = '#cbdbfc';
+      c.font = '13px system-ui';
+      c.fillText(`${hudIsland.textContent} · Year ${fr.year}`, 8, size + 16);
+      (track as any).requestFrame?.();
+      await new Promise(r => setTimeout(r, 125));         // ~8 fps
+    }
+    rec.stop();
+    await done;
+    const blob = new Blob(chunks, { type: 'video/webm' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `chronica-${hudIsland.textContent}-timelapse.webm`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    tlFrames = [];
   }
 
   // catch-up digest (11 §G3): after a time jump > 5 years, "previously on"
@@ -1571,6 +1798,7 @@ ${parts.join('\n')}</body>`;
     drawOverlay();
     drawDynamic();
     if (latest) {
+      watchStarred();
       beacons.update(majors, latest.tick, now, latest.inPast);
       beacons.draw(renderer.ctx, renderer.camera, now);
       beacons.drawArrows(renderer.ctx, renderer.camera, now);

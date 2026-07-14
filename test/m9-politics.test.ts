@@ -62,13 +62,15 @@ describe('M9: politics', () => {
         }
       }
     }
-    const before = s.factions.filter(x => !x.extinct).length;
     sim.runYears(2);
     const crisis = s.events.filter(e => e.text.includes('realm trembles'));
     const splits = s.events.filter(e => e.type === EventType.FactionSplit && e.tick >= s.tick - 2 * TICKS_PER_YEAR);
     expect(crisis.length).toBeGreaterThanOrEqual(1);
     expect(splits.length).toBeGreaterThanOrEqual(1);
-    expect(s.factions.filter(x => !x.extinct).length).toBeGreaterThan(before);
+    // the seceded settlement now flies the rebel banner (net faction count can
+    // still dip if an unrelated faction dies in the same window: don't assert it)
+    const rebel = s.factions.find(x => !x.extinct && x.name.startsWith('Free '));
+    expect(rebel).toBeTruthy();
   }, 240_000);
 
   it('500y seed 42: faction count varies, dynasties turn, slots stay <= 8', () => {

@@ -37,6 +37,7 @@ export function promoteNamed(
     kills: 0,
     parentNamedId: -1,
     traits: rollTraits(s.seed, s.named.length),
+    renown: role === 'king' ? 10 : role === 'hero' || role === 'founder' ? 5 : 2,
   };
   s.named.push(nc);
   s.namedActive++;

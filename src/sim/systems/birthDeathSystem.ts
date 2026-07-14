@@ -5,6 +5,7 @@ import { RACE_TABLE } from '../raceData';
 import { AGE_SCALE, PawnFlag, SimState, effFood } from '../state';
 import { spawnPawn, killPawn } from '../pawnOps';
 import { emitEvent, yearOf } from '../events/events';
+import { eraMods } from '../rules/eras';
 
 const GESTATION_TICKS = 270;
 
@@ -12,6 +13,10 @@ export function birthDeathSystem(s: SimState): void {
   const p = s.pawns;
   const rngBirths = s.rng.get('births');
   const rngDeaths = s.rng.get('deaths');
+  // world laws + turning ages (M12): fertility and lifespan pressure dials
+  const era = eraMods(s.seed, yearOf(s.tick), s.config.eraWheel ?? true);
+  const fertScale = ((s.config.fertilityScale ?? 100) * era.fertility / 100) | 0;
+  const lifeScale = s.config.lifespanScale ?? 100;
 
   for (let i = 0; i < s.pawnCount; i++) {
     if (!(p.flags[i] & PawnFlag.Alive)) continue;
@@ -31,7 +36,7 @@ export function birthDeathSystem(s: SimState): void {
       const span = rs.maxAgeYears - rs.elderAtYears;
       const over = years - rs.elderAtYears - ((p.longevity[i] - 128) >> 4);
       if (over > 0) {
-        const chance = Math.min(900, (over * over * 900) / (span * span) | 0);
+        const chance = Math.min(900, (((over * over * 900) / (span * span) | 0) * 100 / lifeScale) | 0);
         if (rngDeaths.chance(chance, 12000)) {
           killPawn(s, i, 'oldage');
           continue;
@@ -98,7 +103,7 @@ export function birthDeathSystem(s: SimState): void {
         let damp = fpc <= 6000 ? 0 : fpc >= 25000 ? 100 : ((fpc - 6000) / 190) | 0;
         if (p.mood[i] < 80) damp = (damp * 60 / 100) | 0;
         damp = Math.max(0, damp - (st.crowding >> 1));      // soft capacity (03)
-        const num = (rs.breedChanceNum * damp * (64 + (p.fertility[i] >> 1))) / (100 * 128) | 0;
+        const num = (rs.breedChanceNum * damp * (64 + (p.fertility[i] >> 1))) * fertScale / (100 * 128 * 100) | 0;
         if (num > 0 && rngBirths.chance(num, 1000)) {
           p.flags[i] |= PawnFlag.Pregnant;
           p.pregTicks[i] = 0;

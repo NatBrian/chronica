@@ -4,7 +4,7 @@ import { EventType, WorldEvent, TICKS_PER_YEAR } from '../shared/types';
 
 export interface ChapterDraft {
   id: number;
-  kind: 'war' | 'famine' | 'succession' | 'founding' | 'disaster' | 'era-life' | 'ending' | 'crisis';
+  kind: 'war' | 'famine' | 'succession' | 'founding' | 'disaster' | 'era-life' | 'ending' | 'crisis' | 'hero';
   titleHint: string;
   factIds: number[];
   yearStart: number;
@@ -145,6 +145,39 @@ export function detectChapters(
     }
   }
   return { drafts, cursor };
+}
+
+/** Hero arcs (M11, P3.4): a life of renown becomes "The Life of X", anchored
+ *  fact-by-fact to the event log (validator-proof by construction). */
+export function detectHeroArcs(
+  named: { id: number; name: string; factionId: number; renown?: number }[],
+  events: WorldEvent[],
+  heroDone: Record<number, boolean>,
+  nextChapterId: number,
+): { draft: ChapterDraft; title: string }[] {
+  const out: { draft: ChapterDraft; title: string }[] = [];
+  let chapterId = nextChapterId;
+  for (const n of named) {
+    if ((n.renown ?? 0) < 30 || heroDone[n.id]) continue;
+    const life = events.filter(e => e.actors?.includes(n.id) && e.severity >= 2);
+    if (life.length < 4) continue;
+    heroDone[n.id] = true;
+    const facts = life.slice(0, MAX_FACTS);
+    out.push({
+      title: `The Life of ${n.name}`,
+      draft: {
+        id: chapterId++,
+        kind: 'hero',
+        titleHint: `the life of ${n.name}`,
+        factIds: facts.map(e => e.id),
+        yearStart: Math.floor(facts[0].tick / TICKS_PER_YEAR),
+        yearEnd: Math.floor(facts[facts.length - 1].tick / TICKS_PER_YEAR),
+        x: facts[0].x, y: facts[0].y,
+        factionIds: [n.factionId],
+      },
+    });
+  }
+  return out;
 }
 
 function chunk(arr: WorldEvent[], size: number): WorldEvent[][] {

@@ -52,6 +52,12 @@ export class Beacons {
     }
   }
 
+  /** starred-character moments are tier-1 regardless of type (M11, P3.1) */
+  force(ev: BeaconEvent, now: number): void {
+    if (this.inWindow.has(ev.id)) return;
+    this.inWindow.set(ev.id, { ev, bornAt: now, live: true });
+  }
+
   /** rings + pins, screen-space sized so a far war reads at World zoom (H1) */
   draw(ctx: CanvasRenderingContext2D, cam: Camera, now: number): void {
     for (const b of this.inWindow.values()) {
