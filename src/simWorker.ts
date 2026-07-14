@@ -282,6 +282,7 @@ function snapshotMsg() {
     namedPos: s.named
       .filter(n => n.deathTick < 0 && n.pawnIdx >= 0)
       .map(n => ({ id: n.id, name: n.name, x: s.pawns.x[n.pawnIdx], y: s.pawns.y[n.pawnIdx] })),
+    weather: { drought: s.weather.drought, winterSeverity: s.weather.winterSeverity, plagueActive: s.weather.plagueActive },
     eventsTail: s.events.slice(-40),
     eventCount: s.events.length,
     yearStats: s.yearStats.slice(-1),

@@ -11,6 +11,7 @@ import { FACTION_HEX } from './render/palette';
 import { eventMeta, CATEGORY_LIST, CATEGORY_COLOR, EventCategory, eraColor } from './ui/eventMeta';
 import { Beacons } from './ui/beacons';
 import { Spectacle } from './render/spectacle';
+import { Ambience } from './render/ambience';
 import { StatsPanel, StatsData } from './ui/statsCharts';
 import { TICKS_PER_YEAR, Journal, DecisionRequest, DecisionResult, JournalEntry } from './shared/types';
 import { SaveStore, IdbBackend, SaveRecord } from './shared/saveStore';
@@ -137,6 +138,7 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
   let mapMode: MapMode | null = null;
   const beacons = new Beacons();
   const spectacle = new Spectacle();
+  const ambience = new Ambience(512);
   let flyTarget: { x: number; y: number } | null = null;
   // follow + favorites (M11, P3.1)
   let starred = new Set<number>();
@@ -1849,6 +1851,11 @@ ${parts.join('\n')}</body>`;
     drawDynamic();
     if (latest) {
       watchStarred();
+      // living world (doc 13 V4): smoke, weather, roads, birds under the show
+      ambience.observeCaravans(latest.caravans ?? []);
+      const px9 = renderer.camera.pxPerTile;
+      const dAlpha = px9 <= 4.5 ? 0 : px9 >= 12 ? 1 : (px9 - 4.5) / 7.5;
+      ambience.draw(renderer.ctx, renderer.camera, now, latest.tick, latest as any, dAlpha);
       // the show (doc 13 V2): scenes first, beacons/pins above them
       spectacle.update(majors as any, latest.tick, now, speed);
       spectacle.draw(renderer.ctx, renderer.camera, now);
