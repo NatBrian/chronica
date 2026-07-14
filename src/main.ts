@@ -10,6 +10,7 @@ import { MapMode } from './render/mapMode';
 import { FACTION_HEX } from './render/palette';
 import { eventMeta, CATEGORY_LIST, CATEGORY_COLOR, EventCategory, eraColor } from './ui/eventMeta';
 import { Beacons } from './ui/beacons';
+import { Spectacle } from './render/spectacle';
 import { StatsPanel, StatsData } from './ui/statsCharts';
 import { TICKS_PER_YEAR, Journal, DecisionRequest, DecisionResult, JournalEntry } from './shared/types';
 import { SaveStore, IdbBackend, SaveRecord } from './shared/saveStore';
@@ -135,6 +136,7 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
   let lastFarmsPoll = 0;
   let mapMode: MapMode | null = null;
   const beacons = new Beacons();
+  const spectacle = new Spectacle();
   let flyTarget: { x: number; y: number } | null = null;
   // follow + favorites (M11, P3.1)
   let starred = new Set<number>();
@@ -1593,7 +1595,18 @@ ${parts.join('\n')}</body>`;
 
   const DIPLO_NAMES = ['at war', 'hostile', 'neutral', 'trading', 'allied', 'vassal'];
   canvas.addEventListener('mousemove', (e) => {
-    if (overlayMode !== 'war' || !mapMode || dragging) { ovTip.style.display = 'none'; return; }
+    if (dragging) { ovTip.style.display = 'none'; return; }
+    const rect0 = canvas.getBoundingClientRect();
+    // scene captions (doc 13 V2): hovering a running show names it
+    const cap = spectacle.hover(e.clientX - rect0.left, e.clientY - rect0.top, renderer.camera);
+    if (cap) {
+      ovTip.textContent = cap;
+      ovTip.style.left = `${e.clientX + 14}px`;
+      ovTip.style.top = `${e.clientY + 10}px`;
+      ovTip.style.display = 'block';
+      return;
+    }
+    if (overlayMode !== 'war' || !mapMode) { ovTip.style.display = 'none'; return; }
     const rect = canvas.getBoundingClientRect();
     const hit = mapMode.borderAt(e.clientX - rect.left, e.clientY - rect.top, renderer.camera, 14);
     if (!hit) { ovTip.style.display = 'none'; return; }
@@ -1836,9 +1849,17 @@ ${parts.join('\n')}</body>`;
     drawDynamic();
     if (latest) {
       watchStarred();
+      // the show (doc 13 V2): scenes first, beacons/pins above them
+      spectacle.update(majors as any, latest.tick, now, speed);
+      spectacle.draw(renderer.ctx, renderer.camera, now);
       beacons.update(majors, latest.tick, now, latest.inPast);
       beacons.draw(renderer.ctx, renderer.camera, now);
       beacons.drawArrows(renderer.ctx, renderer.camera, now);
+      spectacle.drawOverlay(renderer.ctx, renderer.camera);
+      // camera shake rides a CSS transform: sim canvas only, no state drift
+      canvas.style.transform = spectacle.shake > 0.05
+        ? `translate(${(Math.random() - 0.5) * spectacle.shake * 2}px, ${(Math.random() - 0.5) * spectacle.shake * 2}px)`
+        : '';
     }
     drawTimeline();
     drawMinimap();
@@ -2062,7 +2083,7 @@ ${parts.join('\n')}</body>`;
 
   // test/debug handle (used by Playwright checks)
   (window as any).__chronica = {
-    renderer, worker, beacons,
+    renderer, worker, beacons, spectacle,
     getLatest: () => latest,
     getMajors: () => majors,
     openRail,
