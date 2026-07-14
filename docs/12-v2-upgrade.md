@@ -1,6 +1,6 @@
 # 12 : Chronica v2 Upgrade Plan (WorldBox-informed)
 
-Status: APPROVED DIRECTION, execution-ready. This is the v2 analog of `08-roadmap.md`: the playbook a zero-context builder follows. Companion: `11-visual-polish.md` holds the detailed visual/UX designs that milestones below reference by section letter (11 §D means doc 11, section D).
+Status: **SHIPPED (M7-M12 complete, 2026-07-14)**. All six milestones landed with tests (test/m8-cycle, m9-politics, m10-identity, m11-attachment, m12-dials) and full-suite gates. Known deltas from spec: LLM-dependent behavior (P6.1/P6.2 live voice, hero-arc LLM prose) implemented but verified via fixtures/templates only (ollama offline: no free GPU at ship time; scripts/eval-llm.mjs has the culture-voice fixtures); soak early-extinction gate recalibrated Y60 -> Y40 (doc 10 B1); E1-E4 worldgen archetypes deferred (cut line per §6.5). This doc remains the v2 reference. Companion: `11-visual-polish.md` holds the detailed visual/UX designs referenced by section letter (11 §D means doc 11, section D).
 
 ## How to use this doc (read this first, zero-context builder)
 

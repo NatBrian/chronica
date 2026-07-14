@@ -9,9 +9,10 @@ const CFG = { mapSize: 192 };
 
 describe('M9: politics', () => {
   it('natural rebellion births a working faction; replay bit-identical', () => {
-    // seed 42 produces a revolt (Millford breaks from its conqueror ~Y94)
+    // seed 42 revolts 3 times within 300y on the current world line
+    // (rng-ripple sensitive: any sim change re-rolls WHEN, not WHETHER)
     const sim = Sim.fresh(42, CFG);
-    sim.runYears(120);
+    sim.runYears(300);
     const s = sim.state;
     const splits = s.events.filter(e => e.type === EventType.FactionSplit);
     expect(splits.length).toBeGreaterThanOrEqual(1);
@@ -26,7 +27,7 @@ describe('M9: politics', () => {
       }
     }
     // the whole political history replays bit-identically from the journal
-    const b = Sim.replay(sim.journal, 120 * TICKS_PER_YEAR);
+    const b = Sim.replay(sim.journal, 300 * TICKS_PER_YEAR);
     expect(b.hash()).toBe(sim.hash());
   }, 300_000);
 

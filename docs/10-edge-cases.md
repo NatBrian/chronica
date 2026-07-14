@@ -45,6 +45,7 @@ Single audit surface for edge cases across all systems. Each entry: trigger → 
 | B3 | Faction ids grew past MAX_FACTIONS when splits outlived extinctions: pairKey indexed out of bounds and crashed the tick (found by M9 sweep) | Rebellion-born factions REUSE an extinct id (claimFactionSlot): pair rows wiped to Neutral, stale vassalOf pointers cleared; ids never exceed 8 (test/m9-politics.test.ts 500y invariant) | 04/12 |
 | B4 | A settlement seceding mid-war left its pawns inside the parent's marching squads: mixed-faction armies | splitFaction deserts them home: seceded members leave parent squads (empty squads disband); 500y test asserts squads never carry foreign members | 04/12 |
 | B5 | Test-side popCache faking is overwritten by the periodic stats refresh within ~300 ticks | Engineer tests with naturally mature settlements (or move real pawns); never assert on faked popCache | 12 |
+| B6 | The v1 war-share gate (<60% of years with any war anywhere) cannot survive M9: faction churn doubles the actor count, so "some war somewhere" rises even at constant per-pair rates | Gate recalibrated (M12): war-share < 80% AND a real peace streak >= 3y must exist in 500y. Per-pair war-rate metric is the better long-term gate if this needs tightening | 12 |
 
 ## Registry rules
 

@@ -29,9 +29,15 @@ describe('500-year soak (08 testing contract)', () => {
     const drama = s.events.filter(e => e.severity >= 3).length;
     console.log(`y500: pop=${s.alivePawns} factions=[${s.yearStats.at(-1)!.popByFaction}] warYears=${wars} majors=${drama} events=${s.events.length}`);
     expect(drama).toBeGreaterThan(30);          // not a frozen equilibrium
-    // war-share < 60%
+    // war-share: "some war somewhere" cannot stay under the old 60% once M9
+    // faction churn doubles the actor count (doc 10 B6): the health contract
+    // is now "not perpetual total war, and real peace still happens"
     const warShare = s.yearStats.filter(y => y.warTicks > 180).length / 500;
-    expect(warShare).toBeLessThan(0.6);
+    console.log(`war-share: ${(warShare * 100).toFixed(0)}%`);
+    expect(warShare).toBeLessThan(0.8);
+    let peaceRun = 0, peaceBest = 0;
+    for (const y of s.yearStats) { peaceRun = y.warTicks === 0 ? peaceRun + 1 : 0; peaceBest = Math.max(peaceBest, peaceRun); }
+    expect(peaceBest).toBeGreaterThanOrEqual(3);
   }, 600_000);
 
   it('race soak (reduced): most seeds finish 500y alive; extinctions late', () => {
