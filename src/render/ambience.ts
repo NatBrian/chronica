@@ -4,7 +4,13 @@
 // (cosmetic wear, resets on reload by design).
 import { Camera } from './camera';
 import { TICKS_PER_YEAR } from '../shared/types';
-import { fnv1a } from '../sim/rng/rng';
+
+/** Integer mix hash: allocation-free seeded variation on the hot draw path. */
+function ih(a: number, b: number): number {
+  let h = (a * 374761393 + b * 668265263) | 0;
+  h = Math.imul(h ^ (h >>> 13), 1103515245);
+  return (h ^ (h >>> 16)) >>> 0;
+}
 
 const TICKS_PER_SEASON = TICKS_PER_YEAR / 4;
 
@@ -17,11 +23,19 @@ export class Ambience {
     this.wear = new Uint8Array(mapSize * mapSize);
   }
 
-  /** caravans grind the grass into roads (V4/B5, emergent wear) */
+  /** caravans grind the grass into roads (V4/B5, emergent wear).
+   *  v3 (doc 14 T3b.2): wear spreads to neighbors so routes become visible
+   *  roads instead of scattered specks. */
   observeCaravans(caravans: { x: number; y: number }[]): void {
     for (const c of caravans) {
-      const i = (c.y | 0) * this.wearN + (c.x | 0);
-      if (i >= 0 && i < this.wear.length && this.wear[i] < 250) this.wear[i] += 3;
+      const cx = c.x | 0, cy = c.y | 0;
+      const i = cy * this.wearN + cx;
+      if (i < 0 || i >= this.wear.length) continue;
+      if (this.wear[i] < 250) this.wear[i] += 6;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+        const j = (cy + dy) * this.wearN + (cx + dx);
+        if (j >= 0 && j < this.wear.length && this.wear[j] < 200) this.wear[j] += 2;
+      }
     }
   }
 
@@ -35,17 +49,42 @@ export class Ambience {
   ): void {
     const season = Math.floor(tick / TICKS_PER_SEASON) % 4;
 
+    // drifting cloud shadows (doc 14 T1.5): world-anchored soft blobs, so the
+    // land breathes; pure function of (cloud index, clock), render-only
+    if (cam.pxPerTile <= 32) {
+      const N = this.wearN;
+      for (let k = 0; k < 3; k++) {
+        const seed = ih(k, 101);
+        const drift = now / (46000 + (seed % 9000));
+        const wx = ((seed % N) + drift * N * 0.6 + k * N / 3) % (N * 1.3) - N * 0.15;
+        const wy = ((seed >> 8) % N) + Math.sin(drift * 4 + k * 2.1) * N * 0.06;
+        const [sx, sy] = cam.worldToScreen(wx, wy);
+        const r = (34 + (seed % 14)) * cam.pxPerTile;
+        if (sx < -r || sy < -r || sx > cam.viewW + r || sy > cam.viewH + r) continue;
+        const grad = ctx.createRadialGradient(sx, sy, r * 0.2, sx, sy, r);
+        grad.addColorStop(0, 'rgba(20,24,40,0.085)');
+        grad.addColorStop(0.7, 'rgba(20,24,40,0.05)');
+        grad.addColorStop(1, 'rgba(20,24,40,0)');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.ellipse(sx, sy, r, r * 0.62, (seed % 7) / 7, 0, 7);
+        ctx.fill();
+      }
+    }
+
     if (detailAlpha > 0.05) {
       ctx.globalAlpha = detailAlpha;
-      // worn roads where caravans have passed
-      if (cam.pxPerTile >= 8) {
+      // worn roads where caravans have passed: deeper wear = wider, warmer
+      if (cam.pxPerTile >= 4) {
         const { x0, y0, x1, y1 } = cam.viewRect();
-        ctx.fillStyle = 'rgba(102,57,49,0.35)';
         for (let y = y0; y < y1; y++) {
           for (let x = x0; x < x1; x++) {
-            if (this.wear[y * this.wearN + x] > 12) {
-              const [sx, sy] = cam.worldToScreen(x + 0.35, y + 0.35);
-              ctx.fillRect(Math.round(sx), Math.round(sy), Math.max(2, cam.pxPerTile * 0.3), Math.max(2, cam.pxPerTile * 0.3));
+            const w2 = this.wear[y * this.wearN + x];
+            if (w2 > 8) {
+              const [sx, sy] = cam.worldToScreen(x + 0.25, y + 0.25);
+              ctx.fillStyle = w2 > 60 ? 'rgba(176,148,104,0.6)' : 'rgba(140,110,78,0.42)';
+              const s = Math.max(2, cam.pxPerTile * (w2 > 60 ? 0.55 : 0.4));
+              ctx.fillRect(Math.round(sx), Math.round(sy), s, s);
             }
           }
         }
@@ -76,7 +115,7 @@ export class Ambience {
         const [sx, sy] = cam.worldToScreen(st.x + 0.5, st.y + 0.5);
         if (sx < 0 || sy < 0 || sx > cam.viewW || sy > cam.viewH) continue;
         for (let bd = 0; bd < 3; bd++) {
-          const a = now / 3400 + bd * 2.1 + fnv1a(`bird:${st.x}`) % 7;
+          const a = now / 3400 + bd * 2.1 + ih(st.x, 9) % 7;
           const bx = sx + Math.cos(a) * (30 + bd * 8);
           const by = sy - 30 + Math.sin(a) * 12;
           const flap = Math.sin(now / 120 + bd) > 0 ? 1 : 0;
@@ -98,8 +137,8 @@ export class Ambience {
       const flakes = 40 + (w?.winterSeverity ?? 0) / 4;
       ctx.fillStyle = 'rgba(255,255,255,0.7)';
       for (let f = 0; f < flakes; f++) {
-        const fx = (fnv1a(`sn:${f}`) % 1000) / 1000 * cam.viewW + Math.sin(now / 900 + f) * 14;
-        const fy = ((now / 24 + (fnv1a(`sy:${f}`) % 997)) % (cam.viewH + 8)) - 4;
+        const fx = (ih(f, 1) % 1000) / 1000 * cam.viewW + Math.sin(now / 900 + f) * 14;
+        const fy = ((now / 24 + (ih(f, 2) % 997)) % (cam.viewH + 8)) - 4;
         ctx.fillRect(Math.round(fx % (cam.viewW + 10)), Math.round(fy), 2, 2);
       }
     } else if (w && w.drought > 0) {
@@ -114,16 +153,29 @@ export class Ambience {
     } else {
       // passing rain showers, seeded from the sim clock: scrub-consistent
       const cell = Math.floor(tick / (TICKS_PER_SEASON / 2));
-      const raining = (season === 0 || season === 2) && fnv1a(`rain:${cell}`) % 3 === 0;
+      const raining = (season === 0 || season === 2) && ih(cell, 8) % 3 === 0;
       if (raining) {
         ctx.strokeStyle = 'rgba(95,205,228,0.35)';
         ctx.lineWidth = 1;
         ctx.beginPath();
         for (let r = 0; r < 46; r++) {
-          const rx = (fnv1a(`rx:${r}`) % 1000) / 1000 * cam.viewW;
-          const ry = ((now / 3 + (fnv1a(`ry:${r}`) % 991)) % (cam.viewH + 20)) - 10;
+          const rx = (ih(r, 3) % 1000) / 1000 * cam.viewW;
+          const ry = ((now / 3 + (ih(r, 4) % 991)) % (cam.viewH + 20)) - 10;
           ctx.moveTo(rx, ry);
           ctx.lineTo(rx - 2, ry + 7);
+        }
+        ctx.stroke();
+        // ground contact (doc 14 T5.4): splash rings where drops land
+        ctx.strokeStyle = 'rgba(203,219,252,0.3)';
+        ctx.beginPath();
+        for (let r = 0; r < 14; r++) {
+          const t = ((now / 6 + (ih(r, 5) % 613)) % 400) / 400;
+          if (t > 0.25) continue;
+          const rx = (ih(r, 6) % 1000) / 1000 * cam.viewW;
+          const ry = (ih(r, 7) % 1000) / 1000 * cam.viewH;
+          const rr = 1 + t * 14;
+          ctx.moveTo(rx + rr, ry);
+          ctx.ellipse(rx, ry, rr, rr * 0.4, 0, 0, 7);
         }
         ctx.stroke();
         ctx.fillStyle = 'rgba(48,96,130,0.05)';

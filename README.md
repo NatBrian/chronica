@@ -12,27 +12,35 @@ Three headline features that together form the core loop:
 - **Living chronicle.** An LLM historian clusters the event causality graph into narrative chapters and writes the island's history as it unfolds. Every fact is validated against the event log; invented names or years are rejected and fall back to template prose.
 - **Time machine.** The simulation is strictly deterministic. `history = f(seed, decision journal)`. Scrub the timeline to any year. Click a chronicle paragraph to jump the camera to that year and place. Replays are bit-identical and make zero LLM calls.
 
-### World simulation details
-- **Attachments & dials:** character sheets with 3-generation lineage, star/follow camera, world records, deterministic era wheel with announced turns, 200-year timelapse webm export, and genesis-time world laws that tune aggression, fertility, lifespan, and disaster frequency.
-- **Identity & politics:** culture systems with doctrine, succession, and values that drift through rebellion; deterministic character traits that bias decisions; diegetic war names; race-flavored building sprites and crop stages.
-- **Empire cycle:** prosperity-driven expansion, loyalty systems, siege capture, garrison rally cooldowns, and a war-strip UI showing active fronts at a glance.
-- **Spectacle engine:** zoom-scaled battle scenes, coronation rays, dragon attacks, plague creep, rebellion shockwaves, founding wagon convoys, famine desaturation, festival bonfires, fireworks, and era-turn letterbox title cards.
-- **Asset unification:** DB32 palette, glyph-style building and monster sprites, composed pixel sprites replacing all canvas emoji, building mirror variety.
-- **Live seed preview:** debounced worldgen island preview on the landing page, along with a split-flap title effect and a bronze-framed parchment minimap.
+### The world
+- **Terrain that reads like a map:** procedural island with hillshade relief, biome-specific forests and pines, animated coastal waves and shore foam, rivers, drifting cloud shadows, and a soft vignette. A curated pixel-art palette keeps every zoom level legible.
+- **Civilizations that visibly advance:** multi-tile buildings in four race architecture styles with kingdom-colored roofs. Towns grow from timber hamlets into walled stone cities: streets, plazas, wells, market stalls, statues, fountains, and capital keeps appear as population and prosperity rise. Crop fields till, sprout, and ripen gold with the seasons. Caravans wear visible trade roads between settlements.
+- **A living population:** animated pixel pawns with race-distinct silhouettes that walk, farm, mine, and fight. Kings and heroes carry name banners on the map. At strategic zoom, idle townsfolk fold into plaza crowds so that anything crossing the open map is story: armies, caravans, monsters, protagonists.
+
+### War and drama
+- **Battles you can watch:** engagements render as fighting soldiers with weapon flashes, arrow arcs, and the fallen; sieges pitch tent encampments; marching armies trace intent trails toward their objectives; a war strip announces every front.
+- **History leaves marks:** razed towns burn with flames and glowing embers before collapsing into rubble; battlefields keep blood and scorch decals; festivals scatter confetti. All of it is derived from the event log, so time-machine scrubs replay it exactly.
+- **Spectacle engine:** zoom-scaled scenes for coronations, dragon raids, plagues, rebellions, foundings, famines, festivals, and era turns, complete with letterbox title cards.
+- **Monsters:** dragons, trolls, and wolf packs roam as animated multi-tile creatures with ground shadows.
+
+### Reading the world
+- **Far-zoom map mode:** the island becomes a painted map with faction-tinted territory, chunky borders that pulse red in wartime, heraldic settlement icons, and army banners.
+- **Pixel-consistent UI:** a parchment-and-bronze interface with a hand-drawn pixel icon set (no OS emoji), faction banner sigils, an era-labeled timeline, per-faction population sparklines, data overlays (territory, population, food, war), and a global search.
+- **Dials and records:** character sheets with three-generation lineage, star/follow camera, world records, genesis-time world laws (aggression, fertility, lifespan, disasters), and a 200-year timelapse export.
 
 ## Screenshots
 
-| Landing & worldgen preview                      | Terrain biome bake                              |
-| ----------------------------------------------- | ----------------------------------------------- |
-| ![landing](docs/screenshots/v25/v6-landing.png) | ![terrain](docs/screenshots/v25/v3-terrain.png) |
+| Landing & worldgen preview                     | A town at year 5                              |
+| ---------------------------------------------- | --------------------------------------------- |
+| ![landing](docs/screenshots/v3/01-landing.png) | ![town](docs/screenshots/v3/06-y5-mid.png)    |
 
-| Chronicle panel                              | Council panel                            |
-| -------------------------------------------- | ---------------------------------------- |
-| ![chronicle](docs/screenshots/chronicle.png) | ![council](docs/screenshots/council.png) |
+| Chronicle open over the world                       | Territory overlay                                     |
+| --------------------------------------------------- | ----------------------------------------------------- |
+| ![chronicle](docs/screenshots/v3/10-y30-chronicle.png) | ![territory](docs/screenshots/v3/08-y30-territory.png) |
 
-| War overlay                                          | Far-zoom map mode                               |
-| ---------------------------------------------------- | ----------------------------------------------- |
-| ![war overlay](docs/screenshots/m7f-war-overlay.png) | ![far zoom](docs/screenshots/m7a-worldzoom.png) |
+| Far-zoom map mode                              | The same capital, 150 years on                              |
+| ---------------------------------------------- | ----------------------------------------------------------- |
+| ![far zoom](docs/screenshots/v3/09-y30-far.png) | ![century](docs/screenshots/v3/16-y150-capital-close.png)   |
 
 ## Quick start
 
@@ -89,7 +97,7 @@ Alternatively, use a BYO API key (OpenRouter or Anthropic) via the in-app prompt
 
 ```
 chronica/
-  index.html          Entry point, inline CSS, landing overlay
+  index.html          Entry point, landing overlay
   package.json        Vite + TypeScript + Vitest
   tsconfig.json       Strict TypeScript config
   src/
@@ -97,17 +105,18 @@ chronica/
     simWorker.ts      Web Worker entry
     sim/              Pure deterministic core (no I/O, no render imports)
     render/           Canvas2D renderer, camera, sprites, terrain, effects
-    ui/               DOM panels: devtools, event metadata, stats charts, beacons
+    ui/               DOM panels, theme.css, pixel icon set, stats charts, beacons
     brain/            LLM adapters (ollama, BYO key, RuleBrain) + priority queue
     chronicle/        Chapter detector, validator, template fallback
     shared/           Types, serialization, save store
   test/               16 test files: determinism, worldgen, economy, war, LLM, soak, etc.
   scripts/
     lint-sim.mjs      Enforces sim import boundaries
+    visual.mjs        Playwright screenshot matrix for visual QA
     eval-llm.mjs      LLM decision-quality harness
     perf.mjs          Headless throughput benchmark
-  docs/               Design documents (00-vision through 13-visual-overhaul)
-  docs/screenshots/   30+ screenshots across all milestones
+  docs/               Design documents (00-vision through 14-visual-overhaul-v3)
+  docs/screenshots/   Screenshot matrix captured by scripts/visual.mjs
 ```
 
 ## High-level architecture

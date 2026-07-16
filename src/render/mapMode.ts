@@ -20,6 +20,8 @@ export interface MapModeWar { attacker: number; defender: number }
 const CLAIM_RADIUS = 60;          // tiles; matches the v1 territory overlay
 
 export class MapMode {
+  /** icon atlas for chips drawn outside draw() (war overlay swords) */
+  icons: MapIconAtlas | null = null;
   private grid: Int8Array;        // block → factionId, -1 unclaimed
   private gridW: number;
   private key = '';
@@ -73,7 +75,7 @@ export class MapMode {
       img.data[o] = parseInt(col.slice(1, 3), 16);
       img.data[o + 1] = parseInt(col.slice(3, 5), 16);
       img.data[o + 2] = parseInt(col.slice(5, 7), 16);
-      img.data[o + 3] = 34;                       // ~13% wash (11 §C1)
+      img.data[o + 3] = 52;                       // ~20% wash: territory reads at a glance (doc 14 T2.5)
     }
     tctx.putImageData(img, 0, 0);
     // border segments: right (dir 0) and down (dir 1) neighbor mismatches
@@ -147,12 +149,14 @@ export class MapMode {
       ctx.fillStyle = '#14141fd8';
       ctx.fillRect(Math.round(cx) - 16, Math.round(cy) - 9, 32, 18);
       ctx.fillStyle = FACTION_HEX[m.a] ?? '#fff';
-      ctx.fillRect(Math.round(cx) - 12, Math.round(cy) - 5, 9, 6);
+      ctx.fillRect(Math.round(cx) - 13, Math.round(cy) - 5, 9, 10);
       ctx.fillStyle = FACTION_HEX[m.b] ?? '#fff';
-      ctx.fillRect(Math.round(cx) + 3, Math.round(cy) - 5, 9, 6);
-      ctx.fillStyle = '#cbdbfc';
-      ctx.font = '9px system-ui';
-      ctx.fillText('⚔', Math.round(cx) - 3, Math.round(cy) + 3);
+      ctx.fillRect(Math.round(cx) + 4, Math.round(cy) - 5, 9, 10);
+      const sw = this.icons?.index['swords'];
+      if (sw && this.icons) {
+        ctx.drawImage(this.icons.canvas as CanvasImageSource, sw.x, sw.y, ICON_W, ICON_H,
+          Math.round(cx) - 7, Math.round(cy) - 6, 14, 12);
+      }
     }
     // scorch marks at recent battle sites, fading with age (C5 layer b)
     for (const bt of snap.battles) {
@@ -196,14 +200,15 @@ export class MapMode {
     alpha: number, now: number,
   ): void {
     if (alpha <= 0.01) return;
+    this.icons = icons;
     this.refresh(snap.settlements);
     const prevAlpha = ctx.globalAlpha;
     ctx.globalAlpha = alpha;
 
-    // flatten terrain contrast so icons pop (11 §D1), then territory wash
+    // gentle contrast flatten so icons pop (v3: keep the cartography bright)
     const [ox, oy] = cam.worldToScreen(0, 0);
     const mapPx = this.mapSize * cam.pxPerTile;
-    ctx.globalAlpha = alpha * 0.22;
+    ctx.globalAlpha = alpha * 0.10;
     ctx.fillStyle = '#1a1c2c';
     ctx.fillRect(ox, oy, mapPx, mapPx);
     ctx.globalAlpha = alpha;
@@ -275,14 +280,14 @@ export class MapMode {
       if (sx < -80 || sy < -80 || sx > cam.viewW + 80 || sy > cam.viewH + 80) continue;
       const race = snap.factions[st.factionId]?.race ?? 0;
       const tier = popTier(st.pop);
-      const cell = icons.index[`${race}:${tier}`];
+      const cell = icons.index[`${race}:${tier}:${st.factionId}`] ?? icons.index[`${race}:${tier}`];
       const iw = ICON_W * S, ih = ICON_H * S;
       const ix = Math.round(sx - iw / 2), iy = Math.round(sy - ih + 4);
       if (cell) {
-        // dark halo so icons read against any biome
-        ctx.fillStyle = '#14141f99';
+        // soft halo so icons read against any biome (v3: lighter than before)
+        ctx.fillStyle = '#14141f38';
         ctx.beginPath();
-        ctx.ellipse(sx, iy + ih / 2 + 2, iw / 2 + 4, ih / 2 + 4, 0, 0, 7);
+        ctx.ellipse(sx, iy + ih / 2 + 2, iw / 2 + 3, ih / 2 + 3, 0, 0, 7);
         ctx.fill();
         ctx.drawImage(icons.canvas as CanvasImageSource, cell.x, cell.y, ICON_W, ICON_H, ix, iy, iw, ih);
       }

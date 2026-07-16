@@ -4,7 +4,9 @@ Status: EXECUTION PLAN. v2 (doc 12) made the sim comprehensible; this doc makes
 it worth staring at. Companion audit screenshots: `docs/screenshots/audit2/`.
 Ground rules of docs 01/11 hold in full: zero `/src/sim` changes anywhere in
 this doc, render clocks from rAF time, all VFX derivable from (event log +
-current state) so time-machine scrubs replay identically, DB32 palette only,
+current state) so time-machine scrubs replay identically, DB32 palette only
+(v3 note: superseded by doc 14 D1, which extends palette.ts with curated
+DB32+ ramp colors; palette.ts stays the single source of truth),
 zero runtime deps, 60fps at Region zoom with 2000+ pawns.
 
 ## The audit (2026-07-14, live worlds Aerreach Y1040 + Wynost Y1630)

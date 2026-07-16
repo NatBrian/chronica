@@ -20,6 +20,61 @@ export const P = {
   darkGray: 24, charcoal: 25, purple: 26, red: 27, salmon: 28, pink: 29, mossYellow: 30, ocher: 31,
 } as const;
 
+// v3 (doc 14 D1): DB32+ extension: curated ramp colors appended after the 32
+// originals. Existing DB32 indices are untouched; new art samples these slots.
+export const EXT: readonly string[] = [
+  /* 32 */ '#20386e', // oceanDeep
+  /* 33 */ '#2e63a8', // ocean
+  /* 34 */ '#4a8bd4', // oceanShallow
+  /* 35 */ '#79b0e0', // oceanShelf
+  /* 36 */ '#8fd15f', // grassBright
+  /* 37 */ '#6ab446', // grass
+  /* 38 */ '#4e9636', // grassDark
+  /* 39 */ '#3b7a2e', // grassDeep
+  /* 40 */ '#e8d9a8', // sand
+  /* 41 */ '#cdb87f', // sandDark
+  /* 42 */ '#a3a7b0', // rockLight
+  /* 43 */ '#7e848c', // rock
+  /* 44 */ '#5c636e', // rockDark
+  /* 45 */ '#eef3f8', // snow
+  /* 46 */ '#c9d6e6', // snowShadow
+  /* 47 */ '#e3c25a', // cropGold
+  /* 48 */ '#a4c957', // cropGreen
+  /* 49 */ '#a5713f', // woodLight
+  /* 50 */ '#7c4f2a', // wood
+  /* 51 */ '#b8a95c', // steppe
+  /* 52 */ '#9a8c4a', // steppeDark
+  /* 53 */ '#79953f', // hillMoss
+  /* 54 */ '#5d7838', // hillDark
+  /* 55 */ '#55704a', // swamp
+  /* 56 */ '#31543c', // forestFloor
+  /* 57 */ '#245038', // forestFloorDark
+  /* 58 */ '#d8c9a0', // pathLight
+  /* 59 */ '#b09468', // path
+];
+
+/** Full palette: DB32 originals + v3 extension. Index with P / PE slots. */
+export const PAL: readonly string[] = [...DB32, ...EXT];
+export const PAL_RGB: readonly (readonly [number, number, number])[] = PAL.map(hex => {
+  const n = parseInt(hex.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255] as const;
+});
+
+/** Named slots for the v3 extension (continues P numbering). */
+export const PE = {
+  oceanDeep: 32, ocean: 33, oceanShallow: 34, oceanShelf: 35,
+  grassBright: 36, grass: 37, grassDark: 38, grassDeep: 39,
+  sand: 40, sandDark: 41,
+  rockLight: 42, rock: 43, rockDark: 44,
+  snow: 45, snowShadow: 46,
+  cropGold: 47, cropGreen: 48,
+  woodLight: 49, wood: 50,
+  steppe: 51, steppeDark: 52,
+  hillMoss: 53, hillDark: 54,
+  swamp: 55, forestFloor: 56, forestFloorDark: 57,
+  pathLight: 58, path: 59,
+} as const;
+
 /** Faction identity ramps (4 colors each) from palette slots (06).
  *  Slots 4-7 belong to rebellion-born factions (M9). */
 export const FACTION_RAMPS: readonly (readonly [number, number, number, number])[] = [

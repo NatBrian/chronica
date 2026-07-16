@@ -1,14 +1,16 @@
-// Camera: pan / wheel zoom-to-cursor / 4-level px-per-tile zoom ladder (06/07).
-export const ZOOM_LEVELS = [2, 4, 16, 32] as const; // island / region / local / close
-export type ZoomLevel = 0 | 1 | 2 | 3;
+// Camera: pan / wheel zoom-to-cursor / px-per-tile zoom ladder (06/07, doc 14 D2).
+export const ZOOM_LEVELS = [2, 4, 8, 16, 32, 48] as const; // island / region / area / local / close / portrait
+export type ZoomLevel = 0 | 1 | 2 | 3 | 4 | 5;
+/** ladder index of the 16px "local" step (several UI jumps land here) */
+export const LEVEL_LOCAL = 3 as ZoomLevel;
 
 export class Camera {
   /** world position (in tiles, float) at the center of the viewport */
   cx: number;
   cy: number;
-  level: ZoomLevel = 2;
+  level: ZoomLevel = LEVEL_LOCAL;
   /** animated px-per-tile (eases toward ZOOM_LEVELS[level]) */
-  pxPerTile: number = ZOOM_LEVELS[2];
+  pxPerTile: number = ZOOM_LEVELS[LEVEL_LOCAL];
   viewW = 800; viewH = 600;
 
   constructor(private mapSize: number) {
@@ -56,7 +58,7 @@ export class Camera {
 
   /** Step ladder keeping the world point under the cursor fixed. dir ±1. */
   zoomStep(dir: 1 | -1, cursorX?: number, cursorY?: number): void {
-    const nl = Math.min(3, Math.max(0, this.level + dir)) as ZoomLevel;
+    const nl = Math.min(ZOOM_LEVELS.length - 1, Math.max(0, this.level + dir)) as ZoomLevel;
     if (nl === this.level) return;
     if (cursorX !== undefined && cursorY !== undefined) {
       const [wx, wy] = this.screenToWorld(cursorX, cursorY);

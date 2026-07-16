@@ -58,9 +58,11 @@ export class Renderer {
     const cx1 = Math.min(Math.ceil(t.map.size / CHUNK_TILES) - 1, Math.floor((c0x + tilesW + CHUNK_TILES) / CHUNK_TILES));
     const cy1 = Math.min(Math.ceil(t.map.size / CHUNK_TILES) - 1, Math.floor((c0y + tilesH + CHUNK_TILES) / CHUNK_TILES));
     ctx.imageSmoothingEnabled = false;
+    // water swell: two baked phases alternating on a slow clock (doc 14 T1.3)
+    const frame = Math.floor(performance.now() / 700) % 2;
     for (let cy = cy0; cy <= cy1; cy++) {
       for (let cx = cx0; cx <= cx1; cx++) {
-        const chunk = t.chunk(bakePx, cx, cy);
+        const chunk = t.chunk(bakePx, cx, cy, frame);
         if (!chunk) continue;
         const [sx, sy] = cam.worldToScreen(cx * CHUNK_TILES, cy * CHUNK_TILES);
         const sizePx = CHUNK_TILES * bakePx * scale;

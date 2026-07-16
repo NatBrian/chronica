@@ -1,17 +1,21 @@
 // App entry: landing, worker boot, render loop, camera input, time machine UI,
 // autosave, journal export/import, multi-tab lock (F4).
 // Dev tools: ?dev=seeds / ?dev=layers&seed=N / ?dev=sprites.
+import './ui/theme.css';
 import { Renderer } from './render/renderer';
+import { LEVEL_LOCAL } from './render/camera';
 import { RenderMapData, tileColor } from './render/terrain';
 import { mountSeedBrowser, mountLayerViewer, mountSpritePreview } from './ui/devtools';
 import { bakePawnAtlas, actionToJob, SPRITE_W, SPRITE_H, PawnAtlas } from './render/sprites';
-import { bakeMapIcons, bakeBuildingAtlas, BUILDING_CELL, ICON_W, ICON_H } from './render/mapIcons';
+import { bakeMapIcons, bakeBuildingAtlas, bakeMonsterAtlas, BUILDING_CELL, ICON_W, ICON_H, MONSTER_W, MONSTER_H, popTier } from './render/mapIcons';
 import { MapMode } from './render/mapMode';
 import { FACTION_HEX } from './render/palette';
 import { eventMeta, CATEGORY_LIST, CATEGORY_COLOR, EventCategory, eraColor } from './ui/eventMeta';
+import { iconSvg, glyphHtml, bannerSvg } from './ui/icons';
 import { Beacons } from './ui/beacons';
 import { Spectacle } from './render/spectacle';
 import { Ambience } from './render/ambience';
+import { Decals } from './render/decals';
 import { StatsPanel, StatsData } from './ui/statsCharts';
 import { TICKS_PER_YEAR, Journal, DecisionRequest, DecisionResult, JournalEntry } from './shared/types';
 import { SaveStore, IdbBackend, SaveRecord } from './shared/saveStore';
@@ -54,7 +58,43 @@ interface WorkerSnapshot {
 
 const FACTION_COLORS = FACTION_HEX;
 
+/** Swap static markup glyphs for pixel icons (doc 14 T4.1: no OS emoji). */
+function applyStaticIcons(): void {
+  const set = (sel: string, html: string) => {
+    const el = document.querySelector(sel);
+    if (el) el.innerHTML = html;
+  };
+  set('#btn-pause', iconSvg('pause'));
+  set('#btn-present', `Jump to present ${iconSvg('ff', 11)}`);
+  set('#btn-director', iconSvg('eye'));
+  set('#btn-timelapse', iconSvg('film'));
+  set('#btn-export', iconSvg('down'));
+  set('#btn-import', iconSvg('up'));
+  set('#rail-close', iconSvg('x', 12));
+  set('#chain-close', iconSvg('x', 10));
+  set('#btn-chron-export', `${iconSvg('down', 10)} book`);
+  set('.rtab[data-tab="chronicle"]', `${iconSvg('book', 11)} Chronicle`);
+  set('.ov[data-ov="territory"]', iconSvg('flag'));
+  set('.ov[data-ov="pop"]', iconSvg('people'));
+  set('.ov[data-ov="food"]', iconSvg('wheat'));
+  set('.ov[data-ov="war"]', iconSvg('swords'));
+  const laws = document.querySelector('#world-laws summary');
+  if (laws) laws.innerHTML = laws.innerHTML.replace('⚖', iconSvg('scales', 12));
+  const byok = document.querySelector('#byok-config summary');
+  if (byok) byok.innerHTML = byok.innerHTML.replace('🔑', iconSvg('key', 12));
+}
+
+
+/** Integer mix hash for per-frame seeded variation on the hot draw path
+ *  (doc 14 D7: deterministic, allocation-free; replaces fnv1a-over-strings). */
+function hash3(a: number, b: number, c: number): number {
+  let h = (a * 374761393 + b * 668265263 + c * 1274126177) | 0;
+  h = Math.imul(h ^ (h >>> 13), 1103515245);
+  return (h ^ (h >>> 16)) >>> 0;
+}
+
 function bootApp(): void {
+  applyStaticIcons();
   const landing = document.getElementById('landing')!;
   const seedInput = document.getElementById('seed-input') as HTMLInputElement;
   const llmStatus = document.getElementById('llm-status')!;
@@ -219,7 +259,7 @@ function bootApp(): void {
       if (!cur || r.savedAt > cur.savedAt) newest.set(r.seed, r);
     }
     const list = document.getElementById('resume-list')!;
-    list.innerHTML = '<div style="color:#9badb7;margin:14px 0 6px;font-size:13px">Continue a world:</div>';
+    list.innerHTML = '<div style="color:var(--dim);margin:14px 0 6px;font-size:13px">Continue a world:</div>';
     for (const rec of [...newest.values()].sort((a, b) => b.savedAt - a.savedAt).slice(0, 5)) {
       const b = document.createElement('button');
       b.className = 'ctl';
@@ -243,12 +283,14 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
   const renderer = new Renderer(canvas, 512);
   const mapIcons = bakeMapIcons();
   const buildingAtlas = bakeBuildingAtlas();
+  const monsterAtlas = bakeMonsterAtlas();
   let farms: number[] = [];              // [x, y, stage] triples, polled
   let lastFarmsPoll = 0;
   let mapMode: MapMode | null = null;
   const beacons = new Beacons();
   const spectacle = new Spectacle();
   const ambience = new Ambience(512);
+  const decals = new Decals();
   let flyTarget: { x: number; y: number } | null = null;
   // follow + favorites (M11, P3.1)
   let starred = new Set<number>();
@@ -264,6 +306,12 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
   const btnPresent = document.getElementById('btn-present')!;
   let latest: WorkerSnapshot | null = null;
   let majors: MajorEvent[] = [];
+  let firstSnapSeen = false;
+  // pawn walk/facing state derived from consecutive snapshots (doc 14 T3.1);
+  // bit0 = moving, bit1 = facing left
+  let pawnAnim = new Uint8Array(0);
+  let prevPX: Int16Array | null = null;
+  let prevPY: Int16Array | null = null;
   let speed = 4;
   let paused = false;
   let readOnly = false;
@@ -301,9 +349,9 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
         worker.postMessage({ t: 'decision', entry });
       },
       (st) => {
-        llmBadge.textContent = st.mode === 'llm'
-          ? `👑 kings think (${st.brainName}, ~${(st.probeMs / 1000).toFixed(1)}s, ${st.quotaPerYear}/y)${st.inFlight ? ' · thinking…' : ''}`
-          : '👑 kings ruling by instinct';
+        llmBadge.innerHTML = st.mode === 'llm'
+          ? `${iconSvg('crown', 11)} kings think (${st.brainName}, ~${(st.probeMs / 1000).toFixed(1)}s, ${st.quotaPerYear}/y)${st.inFlight ? ' · thinking…' : ''}`
+          : `${iconSvg('crown', 11)} kings ruling by instinct`;
         llmBadge.title = `answered ${st.answered} · failures ${st.failures} · queued ${st.queued}`;
       },
     );
@@ -336,6 +384,7 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
       case 'ready': {
         renderer.setMap(msg.map as RenderMapData);
         mapMode = new MapMode(msg.map.size, msg.map.biome);
+        mapMode.icons = mapIcons;
         hudIsland.textContent = msg.islandName;
         document.title = `Chronica: ${msg.islandName}`;
         worldSeed = msg.header.seed;
@@ -347,9 +396,50 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
         worker.postMessage({ t: 'requestChronicle' });
         break;
       }
-      case 'snapshot':
+      case 'snapshot': {
+        const np = msg.pawns;
+        if (pawnAnim.length < np.x.length) pawnAnim = new Uint8Array(np.x.length);
+        if (prevPX && prevPY) {
+          const n = Math.min(np.count, prevPX.length);
+          for (let i = 0; i < n; i++) {
+            const dx = np.x[i] - prevPX[i], dy = np.y[i] - prevPY[i];
+            let a = pawnAnim[i] & 2;
+            if (dx < 0) a = 2; else if (dx > 0) a = 0;
+            pawnAnim[i] = a | (dx !== 0 || dy !== 0 ? 1 : 0);
+          }
+        }
+        prevPX = np.x; prevPY = np.y;
+        // near-town bit (bit2) for the motion hierarchy (doc 14 D9): idle
+        // townsfolk fold into plaza vignettes at strategic zooms
+        const towns = msg.settlements.filter((s: { razed: boolean }) => !s.razed);
+        for (let i = 0; i < np.count; i++) {
+          let near = 0;
+          const pxx = np.x[i], pyy = np.y[i];
+          for (const t of towns) {
+            const dx = t.x - pxx, dy = t.y - pyy;
+            if (dx * dx + dy * dy < 144) { near = 4; break; }
+          }
+          pawnAnim[i] = (pawnAnim[i] & 3) | near;
+        }
         latest = msg;
         brainQueue?.prune(msg.tick);
+      }
+        // first sight of the world: land on the largest settlement, not empty
+        // steppe, and open the history book on wide screens (doc 14 T2.1)
+        if (!firstSnapSeen) {
+          firstSnapSeen = true;
+          const towns = msg.settlements.filter((s: { razed: boolean }) => !s.razed);
+          if (towns.length) {
+            const big = towns.reduce((a: { pop: number }, b: { pop: number }) => (b.pop > a.pop ? b : a));
+            renderer.camera.cx = big.x; renderer.camera.cy = big.y;
+            renderer.camera.level = LEVEL_LOCAL;
+            renderer.camera.pxPerTile = 16;
+          }
+          if (window.innerWidth >= 1100 && !localStorage.getItem('chronica.railSeen')) {
+            localStorage.setItem('chronica.railSeen', '1');
+            openChronicle();
+          }
+        }
         break;
       case 'majorEvents': majors = msg.events; break;
       case 'feed': renderFeed(msg.events); break;
@@ -439,8 +529,12 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
     (btnPresent as HTMLElement).style.display = inPast ? 'inline-block' : 'none';
   }
 
+  // dev-only: ?turbo=N makes the 16x setting run at N ticks/sec (visual QA harness)
+  const turboTps = Number(params.get('turbo') ?? 0);
   function ticksPerSec(): number {
-    return paused || readOnly ? 0 : speed * 10;
+    if (paused || readOnly) return 0;
+    if (turboTps > 0 && speed === 16) return turboTps;
+    return speed * 10;
   }
   function applySpeed(): void {
     worker.postMessage({ t: 'speed', ticksPerSec: ticksPerSec() });
@@ -448,13 +542,13 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
 
   // ---- controls ----
   const btnPause = document.getElementById('btn-pause')!;
-  btnPause.addEventListener('click', () => { paused = !paused; btnPause.textContent = paused ? '▶' : '⏸'; applySpeed(); updateReadingMode(); });
+  btnPause.addEventListener('click', () => { paused = !paused; btnPause.innerHTML = iconSvg(paused ? 'play' : 'pause'); applySpeed(); updateReadingMode(); });
   document.querySelectorAll('button.speed').forEach(b => {
     b.addEventListener('click', () => {
       document.querySelectorAll('button.speed').forEach(x => x.classList.remove('active'));
       b.classList.add('active');
       speed = Number((b as HTMLElement).dataset.s);
-      paused = false; btnPause.textContent = '⏸';
+      paused = false; btnPause.innerHTML = iconSvg('pause');
       applySpeed();
     });
   });
@@ -650,10 +744,10 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
   const tl = document.getElementById('timeline') as HTMLCanvasElement;
   const tlTip = document.getElementById('tl-tooltip')!;
   let tlZoom: { y0: number; y1: number } | null = null;   // decade strip when set
-  const ERA_H = 9;                                        // era band strip height
+  const ERA_H = 12;                                       // era band strip height (v4: taller, labeled)
   function sizeTimeline(): void {
     tl.width = tl.clientWidth || 600;
-    tl.height = 34;
+    tl.height = 44;
   }
   sizeTimeline();
 
@@ -690,12 +784,18 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
       const x1 = Math.min(W, yearToX(era.yearEnd, W));
       if (x1 <= 0 || x0 >= W) return;
       ctx.fillStyle = eraColor(i);
-      ctx.globalAlpha = 0.85;
+      ctx.globalAlpha = 0.9;
       ctx.fillRect(x0, 0, x1 - x0, ERA_H - 1);
+      // parchment hairline under each age (v4)
+      ctx.globalAlpha = 0.5;
+      ctx.fillStyle = '#d9a94e';
+      ctx.fillRect(x0, ERA_H - 2, x1 - x0, 1);
       ctx.globalAlpha = 1;
       if (x1 - x0 > 76) {
-        ctx.fillStyle = '#cbdbfc';
-        ctx.fillText(era.name.slice(0, Math.floor((x1 - x0) / 6)), x0 + 3, 0);
+        ctx.fillStyle = '#efe6cf';
+        ctx.font = '600 9px Georgia, serif';
+        ctx.fillText(era.name.slice(0, Math.floor((x1 - x0) / 6)), x0 + 4, 2);
+        ctx.font = '9px system-ui';
       }
     });
     // baseline
@@ -705,7 +805,7 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
     for (const c of chronState.chapters) {
       const x = yearToX(c.yearStart, W);
       if (x < -2 || x > W + 2) continue;
-      ctx.fillStyle = '#639bff';
+      ctx.fillStyle = '#d9a94e';
       ctx.fillRect(Math.round(x) - 1, ERA_H + 1, 3, 4);
     }
     // category markers, clustered (11 §G2): one aggregated marker per bucket,
@@ -727,15 +827,30 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
       else { cur.count++; if (ev.severity > cur.top.severity) cur.top = ev; }
     }
     for (const [b, { top, count }] of buckets) {
-      const size = Math.min(8, 2 + count + (top.severity >= 5 ? 2 : 0));
-      ctx.fillStyle = eventMeta(top.type).color;
+      const size = Math.min(9, 3 + count + (top.severity >= 5 ? 2 : 0));
       const x = b * BUCKET + BUCKET / 2;
-      ctx.fillRect(Math.round(x - size / 2), H - 6 - size, size, size);
+      ctx.fillStyle = eventMeta(top.type).color;
+      if (top.severity >= 5) {
+        // tier-1 moments read as diamonds (v4)
+        ctx.save();
+        ctx.translate(Math.round(x), H - 6 - size / 2);
+        ctx.rotate(Math.PI / 4);
+        ctx.fillRect(-size / 2, -size / 2, size, size);
+        ctx.restore();
+      } else {
+        ctx.fillRect(Math.round(x - size / 2), H - 6 - size, size, size);
+      }
     }
-    // cursor
+    // cursor: a bronze needle with a gold head (v4)
     const cx = yearToX(latest.tick / TICKS_PER_YEAR, W);
-    ctx.fillStyle = '#cbdbfc';
+    ctx.fillStyle = '#f0c96a';
     ctx.fillRect(Math.round(cx) - 1, 0, 3, H);
+    ctx.beginPath();
+    ctx.moveTo(Math.round(cx) - 4, 0);
+    ctx.lineTo(Math.round(cx) + 5, 0);
+    ctx.lineTo(Math.round(cx) + 0.5, 5);
+    ctx.closePath();
+    ctx.fill();
     // present marker while replaying
     if (latest.inPast) {
       const px2 = yearToX(latest.presentYear, W);
@@ -754,7 +869,7 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
   // zoom-exit chip + legend chip live next to the canvas
   const tlExit = document.createElement('button');
   tlExit.className = 'ctl';
-  tlExit.textContent = '⤺ all history';
+  tlExit.innerHTML = `${iconSvg('undo', 11)} all history`;
   tlExit.style.display = 'none';
   tl.parentElement!.insertBefore(tlExit, tl);
   tlExit.addEventListener('click', () => { tlZoom = null; tlExit.style.display = 'none'; });
@@ -766,9 +881,9 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
   const legendPop = document.createElement('div');
   legendPop.style.cssText = 'position:fixed;bottom:54px;right:120px;background:#1c1c2bf5;border:1px solid #34345230;' +
     'border-radius:8px;padding:10px 14px;font-size:12px;z-index:22;display:none;line-height:1.7';
-  legendPop.innerHTML = '<b style="font-size:11px;color:#9badb7;letter-spacing:1px">TIMELINE LEGEND</b><br>' +
+  legendPop.innerHTML = '<b style="font-size:11px;color:var(--dim);letter-spacing:1px">TIMELINE LEGEND</b><br>' +
     CATEGORY_LIST.map(c => `<span style="color:${CATEGORY_COLOR[c]}">■</span> ${c}`).join('<br>') +
-    '<br><span style="color:#639bff">■</span> chapter begins' +
+    '<br><span style="color:var(--accent)">■</span> chapter begins' +
     '<br><span style="color:#5fcde4">|</span> the present (while replaying)' +
     '<br>top strip: named eras · click an era to zoom into it';
   document.body.appendChild(legendPop);
@@ -817,9 +932,9 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
     const era = eraAt(year);
     const windowTicks = Math.max(4, (span.y1 - span.y0) * 0.03) * TICKS_PER_YEAR;
     tlTip.innerHTML = `<span class="yr">Year ${Math.floor(year)}</span>` +
-      (era ? ` <span style="color:${eraColor(era.idx)}">■</span> <span style="color:#9badb7">${era.name}</span>` : '') +
+      (era ? ` <span style="color:${eraColor(era.idx)}">■</span> <span style="color:var(--dim)">${era.name}</span>` : '') +
       (best && Math.abs(best.tick - nearTick) < windowTicks
-        ? `<br><span style="color:${eventMeta(best.type).color}">${eventMeta(best.type).glyph}</span> ${best.text}` : '');
+        ? `<br><span style="color:${eventMeta(best.type).color}">${glyphHtml(eventMeta(best.type).glyph)}</span> ${best.text}` : '');
     tlTip.style.left = `${e.clientX}px`;
     (tlTip as HTMLElement).style.display = 'block';
   });
@@ -835,20 +950,20 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
       return `<div class="lbl"><span>${label}</span><span>${Math.round(v)}</span></div><div class="bar"><div style="width:${pct}%"></div></div>`;
     };
     inspectorEl.innerHTML = `
-      <span class="close" id="insp-close">✕</span>
+      <span class="close" id="insp-close">${iconSvg('x', 11)}</span>
       <h4>${pawn.named ? pawn.named.name : `${raceNames[pawn.race]} ${pawn.female ? '♀' : '♂'}`}${pawn.child ? ' (child)' : ''}</h4>
       <div class="lbl"><span>${pawn.faction}</span><span>age ${pawn.ageYears}</span></div>
       ${pawn.named ? `<div class="lbl" style="margin:4px 0"><span>${pawn.named.role}</span>` +
         `<span style="color:#d9a066">${(pawn.named.traits ?? []).join(' · ')}</span></div>` +
-        `<button class="ctl" id="insp-sheet" style="margin:4px 0">📜 character sheet</button>` : ''}
-      <div style="margin:8px 0 4px;color:#9badb7;font-size:12px">doing: <b style="color:#cbdbfc">${pawn.action}</b></div>
+        `<button class="ctl" id="insp-sheet" style="margin:4px 0">${iconSvg('scroll', 11)} character sheet</button>` : ''}
+      <div style="margin:8px 0 4px;color:var(--dim);font-size:12px">doing: <b style="color:#cbdbfc">${pawn.action}</b></div>
       ${bar('hp', pawn.needs.hp * 2.55)}
       ${bar('hunger', pawn.needs.hunger)}
       ${bar('energy', pawn.needs.energy)}
       ${bar('mood', pawn.needs.mood)}
-      <div style="margin-top:8px;color:#9badb7;font-size:12px">considering:</div>
+      <div style="margin-top:8px;color:var(--dim);font-size:12px">considering:</div>
       ${pawn.offers.map((o: any) => `<div class="offer"><span>${o.action}</span><span>${o.score}</span></div>`).join('')}
-      ${pawn.named && pawn.named.memories.length ? `<div style="margin-top:8px;color:#9badb7;font-size:12px">remembers:</div>
+      ${pawn.named && pawn.named.memories.length ? `<div style="margin-top:8px;color:var(--dim);font-size:12px">remembers:</div>
         ${pawn.named.memories.slice(-4).map((m: string) => `<div style="font-size:12px;margin:3px 0">· ${m}</div>`).join('')}` : ''}
     `;
     inspectorEl.style.display = 'block';
@@ -884,7 +999,7 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
       if (ev.type === 39 /* CharacterDied */ && evActors.some(a => starred.has(a) || a === followId)) {
         beacons.force(ev as any, performance.now());
         spectacle.force(ev as any, 'memorial', performance.now());
-        toast(`★ ${ev.text.replace(/^Y\d+: /, '')}`, 'a favorite has fallen', true, () => {
+        toast(`${iconSvg('star', 12)} ${ev.text.replace(/^Y\d+: /, '')}`, 'a favorite has fallen', true, () => {
           flyTarget = { x: ev.x, y: ev.y };
           worker.postMessage({ t: 'chain', eventId: ev.id });
         });
@@ -909,29 +1024,29 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
     const fcol = FACTION_COLORS[sheet.factionId] ?? '#fff';
     const life = sheet.dead ? `Y${sheet.bornYear} · Y${sheet.deathYear} †` : `born Y${sheet.bornYear}`;
     const person = (c: any) => c
-      ? `<span class="fam" data-id="${c.id}" style="cursor:pointer;color:${c.dead ? '#9badb7' : '#cbdbfc'}">${c.name}${c.dead ? ' †' : ''} <i style="color:#696a6a">(${c.role})</i></span>`
+      ? `<span class="fam" data-id="${c.id}" style="cursor:pointer;color:${c.dead ? 'var(--dim)' : '#cbdbfc'}">${c.name}${c.dead ? ' †' : ''} <i style="color:#696a6a">(${c.role})</i></span>`
       : '<span style="color:#696a6a">unknown</span>';
     charSheet.innerHTML = `
-      <span class="close" id="cs-close" style="float:right;cursor:pointer;color:#9badb7">✕</span>
+      <span class="close" id="cs-close" style="float:right;cursor:pointer;color:var(--dim)">${iconSvg('x', 11)}</span>
       <h3><span style="color:${fcol}">■</span> ${sheet.name}</h3>
-      <div style="color:#9badb7;font-size:12px">${sheet.role} of ${sheet.factionName} · ${life}</div>
+      <div style="color:var(--dim);font-size:12px">${sheet.role} of ${sheet.factionName} · ${life}</div>
       <div style="margin:6px 0;font-size:12px">
         <span style="color:#d9a066">${sheet.traits.join(' · ')}</span>
-        · ⭐ ${sheet.renown} renown · ⚔ ${sheet.kills} kills
+        · ${iconSvg('star', 10)} ${sheet.renown} renown · ${iconSvg('swords', 10)} ${sheet.kills} kills
       </div>
       <div style="margin:6px 0">
-        <button class="ctl" id="cs-star">${starred.has(sheet.id) ? '★ starred' : '☆ star'}</button>
-        ${!sheet.dead ? `<button class="ctl" id="cs-follow">${followId === sheet.id ? '⏹ unfollow' : '🎥 follow'}</button>` : ''}
+        <button class="ctl" id="cs-star">${iconSvg('star', 11)} ${starred.has(sheet.id) ? 'starred' : 'star'}</button>
+        ${!sheet.dead ? `<button class="ctl" id="cs-follow">${iconSvg(followId === sheet.id ? 'stop' : 'film', 11)} ${followId === sheet.id ? 'unfollow' : 'follow'}</button>` : ''}
       </div>
-      <div style="color:#9badb7;font-size:11px;letter-spacing:1px;margin-top:8px">LINEAGE</div>
+      <div style="color:var(--dim);font-size:11px;letter-spacing:1px;margin-top:8px">LINEAGE</div>
       <div style="font-size:12px;line-height:1.8">
         ${person(sheet.family.grandparent)} → ${person(sheet.family.parent)} → <b>${sheet.name}</b>
         ${sheet.family.children.length ? `<br>children: ${sheet.family.children.map(person).join(', ')}` : ''}
         ${sheet.family.grandchildren.length ? `<br>grandchildren: ${sheet.family.grandchildren.map(person).join(', ')}` : ''}
       </div>
-      ${sheet.bio.length ? `<div style="color:#9badb7;font-size:11px;letter-spacing:1px;margin-top:8px">DEEDS</div>
+      ${sheet.bio.length ? `<div style="color:var(--dim);font-size:11px;letter-spacing:1px;margin-top:8px">DEEDS</div>
         ${sheet.bio.map((b: string) => `<div style="font-size:12px">· ${b}</div>`).join('')}` : ''}
-      ${sheet.mentions.length ? `<div style="color:#9badb7;font-size:11px;letter-spacing:1px;margin-top:8px">IN THE RECORD</div>
+      ${sheet.mentions.length ? `<div style="color:var(--dim);font-size:11px;letter-spacing:1px;margin-top:8px">IN THE RECORD</div>
         ${sheet.mentions.map((m: any) =>
           `<div class="mention" data-ev="${m.id}" data-x="${m.x}" data-y="${m.y}" style="font-size:12px;cursor:pointer;padding:2px 0">· ${m.text}</div>`).join('')}` : ''}
     `;
@@ -958,15 +1073,15 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
       `<span style="color:${m.value >= 0 ? '#6abe30' : '#d95763'}">${m.value >= 0 ? '+' : ''}${m.value}</span></div>`;
     const loyColor = st.loyalty > 70 ? '#6abe30' : st.loyalty > 35 ? '#d9a066' : '#d95763';
     inspectorEl.innerHTML = `
-      <span class="close" id="insp-close">✕</span>
-      <h4><span style="color:${fcol}">■</span> ${st.name}${st.capital ? ' 👑' : ''}</h4>
+      <span class="close" id="insp-close">${iconSvg('x', 11)}</span>
+      <h4><span style="color:${fcol}">■</span> ${st.name}${st.capital ? ` ${iconSvg('crown', 11)}` : ''}</h4>
       <div class="lbl"><span>${st.factionName}</span><span>founded Y${st.foundedYear}</span></div>
       <div class="lbl" style="margin:4px 0"><span>${st.pop} souls</span><span>${st.food} food · ${st.wood} wood</span></div>
-      <div style="margin:10px 0 4px;color:#9badb7;font-size:12px">loyalty:
+      <div style="margin:10px 0 4px;color:var(--dim);font-size:12px">loyalty:
         <b style="color:${loyColor}">${st.loyalty}</b></div>
       <div class="bar"><div style="width:${Math.min(100, st.loyalty / 1.5)}%;background:${loyColor}"></div></div>
       ${st.loyaltyMods.map(modRow).join('')}
-      ${st.loyalty <= 20 ? '<div style="color:#d95763;font-size:12px;margin-top:6px">⚠ rebellion stirs in the alleys</div>' : ''}
+      ${st.loyalty <= 20 ? `<div style="color:#d95763;font-size:12px;margin-top:6px">${iconSvg('warn', 11)} rebellion stirs in the alleys</div>` : ''}
     `;
     inspectorEl.style.display = 'block';
     document.getElementById('insp-close')!.addEventListener('click', () => {
@@ -1002,7 +1117,7 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
     );
     // auto-pause on war declarations at 1× (07: default ON at 1×, OFF at 16×)
     if (isWar && speed === 1 && !paused) {
-      paused = true; btnPause.textContent = '▶'; applySpeed();
+      paused = true; btnPause.innerHTML = iconSvg('play'); applySpeed();
       showCouncil(msg);
     }
   }
@@ -1010,7 +1125,7 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
   // tier-1 event beacons also toast (G3/H tier map, one source of truth)
   beacons.onTier1Live = (ev) => {
     const meta = eventMeta(ev.type);
-    toast(`${meta.glyph} ${ev.text.replace(/^Y\d+: /, '')}`, 'click to look', meta.cat === 'war', () => {
+    toast(`${glyphHtml(meta.glyph)} ${ev.text.replace(/^Y\d+: /, '')}`, 'click to look', meta.cat === 'war', () => {
       flyTarget = { x: ev.x, y: ev.y };
       worker.postMessage({ t: 'chain', eventId: ev.id });
     }, meta.cat);
@@ -1027,7 +1142,7 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
         const n = Number(prev.dataset.n ?? 1) + 1;
         prev.dataset.n = String(n);
         prev.querySelector('b')!.textContent = `${n} ${cat} moments`;
-        (prev.querySelector('span') as HTMLElement).textContent = `latest: ${title.slice(0, 60)}`;
+        (prev.querySelector('span') as HTMLElement).innerHTML = `latest: ${title.replace(/<svg.*?<\/svg>\s*/, '').slice(0, 60)}`;
         return;
       }
     }
@@ -1035,7 +1150,7 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
     el.className = `toast${war ? ' war' : ''}`;
     el.dataset.cat = cat;
     el.dataset.born = String(performance.now());
-    el.innerHTML = `<b>${title}</b><br><span style="color:#9badb7">${sub}</span>`;
+    el.innerHTML = `<b>${title}</b><br><span style="color:var(--dim)">${sub}</span>`;
     el.addEventListener('click', () => { onClick(); el.remove(); });
     toastStack.appendChild(el);
     setTimeout(() => el.remove(), 9000);
@@ -1046,17 +1161,17 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
     const d = msg.digest;
     const e = msg.entry;
     councilPanel.innerHTML = `
-      <span style="float:right;cursor:pointer;color:#9badb7" id="council-close">✕</span>
-      <h3>👑 ${msg.actorName}</h3>
+      <span style="float:right;cursor:pointer;color:var(--dim)" id="council-close">${iconSvg('x', 11)}</span>
+      <h3>${iconSvg('crown', 13)} ${msg.actorName}</h3>
       <div class="sub">${msg.factionName} · Year ${Math.floor(e.applyAtTick / TICKS_PER_YEAR)} · ${msg.kind.split(':')[0] || 'council'}</div>
-      ${d ? `<div style="font-size:12px;color:#9badb7;margin-bottom:8px">
+      ${d ? `<div style="font-size:12px;color:var(--dim);margin-bottom:8px">
         ${d.situation.foodStores} of food · army ${d.situation.armyStrength} · ${d.situation.population} subjects
         ${d.grudges?.length ? `<br>grudges: ${d.grudges.map((g: any) => `${g.faction.split(' (')[0]} (${g.weight})`).join(', ')}` : ''}
       </div>` : ''}
       <div class="reasoning">“${e.reasoning}”</div>
-      <div style="font-size:12px;color:#9badb7;margin:8px 0 4px">options considered:</div>
+      <div style="font-size:12px;color:var(--dim);margin:8px 0 4px">options considered:</div>
       ${(msg.options ?? []).map((o: string) =>
-        `<div class="opt${o === e.choice ? ' chosen' : ''}">${o === e.choice ? '➤ ' : ''}${o}</div>`).join('')}
+        `<div class="opt${o === e.choice ? ' chosen' : ''}">${o === e.choice ? `${iconSvg('arrow', 9)} ` : ''}${o}</div>`).join('')}
       <div class="src">${e.source === 'fallback' ? 'ruled by instinct (RuleBrain)' : `spoken by the king (${e.source})`}</div>
     `;
     councilPanel.style.display = 'block';
@@ -1159,7 +1274,7 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
     evFiltersEl.appendChild(chip);
   }
   const sevWrap = document.createElement('span');
-  sevWrap.style.cssText = 'margin-left:auto;color:#9badb7;font-size:11px;display:flex;align-items:center;gap:4px';
+  sevWrap.style.cssText = 'margin-left:auto;color:var(--dim);font-size:11px;display:flex;align-items:center;gap:4px';
   sevWrap.innerHTML = 'sev <input id="ev-sev" type="range" min="2" max="5" value="2" style="width:60px">';
   evFiltersEl.appendChild(sevWrap);
   (document.getElementById('ev-sev') as HTMLInputElement).addEventListener('input', (e) => {
@@ -1181,12 +1296,12 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
       row.className = `ev-row sev${ev.severity}`;
       const fcol = ev.factions.length > 0 ? FACTION_COLORS[ev.factions[0]] ?? '#34345230' : '#34345230';
       row.innerHTML = `<span class="yr">Y${Math.floor(ev.tick / TICKS_PER_YEAR)}</span>` +
-        `<span class="gl" style="color:${meta.color}">${meta.glyph}</span>` +
+        `<span class="gl" style="color:${meta.color}">${glyphHtml(meta.glyph)}</span>` +
         `<div class="fc" style="background:${fcol}"></div>` +
         `<span class="tx">${ev.text.replace(/^Y\d+: /, '')}</span>`;
       row.addEventListener('click', () => {
         renderer.camera.cx = ev.x; renderer.camera.cy = ev.y;
-        if (renderer.camera.level < 2) renderer.camera.level = 2;
+        if (renderer.camera.level < LEVEL_LOCAL) renderer.camera.level = LEVEL_LOCAL;
         worker.postMessage({ t: 'chain', eventId: ev.id });
       });
       evList.appendChild(row);
@@ -1195,7 +1310,7 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
       const more = document.createElement('button');
       more.className = 'ctl';
       more.style.cssText = 'margin:8px auto;display:block';
-      more.textContent = `⬆ ${rows.length - evShown} older events`;
+      more.innerHTML = `${iconSvg('up', 10)} ${rows.length - evShown} older events`;
       more.addEventListener('click', () => { evShown += EV_PAGE; renderEvents(true); });
       evList.appendChild(more);
     }
@@ -1220,7 +1335,7 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
     clList.innerHTML = '';
     const rows = councilEntries.filter(en => clFaction < 0 || en.factionId === clFaction);
     if (rows.length === 0) {
-      clList.innerHTML = '<div style="color:#9badb7;font-style:italic;padding:16px 6px">No decisions on record yet.</div>';
+      clList.innerHTML = '<div style="color:var(--dim);font-style:italic;padding:16px 6px">No decisions on record yet.</div>';
       return;
     }
     for (const en of rows.slice(-160).reverse()) {
@@ -1228,7 +1343,7 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
       row.className = 'cl-row';
       const llm = en.source !== 'fallback';
       row.innerHTML =
-        `<div class="hd"><span style="color:${FACTION_COLORS[en.factionId] ?? '#9badb7'}">👑 ${en.actorName} · ${en.factionName}</span>` +
+        `<div class="hd"><span style="color:${FACTION_COLORS[en.factionId] ?? 'var(--dim)'}">${iconSvg('crown', 10)} ${en.actorName} · ${en.factionName}</span>` +
         `<span>Y${Math.floor(en.applyAtTick / TICKS_PER_YEAR)}</span></div>` +
         `<div class="ch">${en.choice.split('(')[0].replace(/_/g, ' ').toLowerCase()}</div>` +
         (en.reasoning ? `<div class="rs">“${en.reasoning}”</div>` : '') +
@@ -1253,8 +1368,8 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
       box.style.cssText = 'margin-top:12px;font-size:12px;line-height:1.8';
       tab.appendChild(box);
     }
-    box.innerHTML = '<div style="color:#9badb7;font-size:11px;letter-spacing:1px;text-transform:uppercase">WORLD RECORDS</div>' +
-      rows.map(r => `<div>🏆 ${r}</div>`).join('');
+    box.innerHTML = '<div style="color:var(--dim);font-size:11px;letter-spacing:1px;text-transform:uppercase">WORLD RECORDS</div>' +
+      rows.map(r => `<div>${iconSvg('star', 10)} ${r}</div>`).join('');
   }
 
   function ensureStatsPanel(): void {
@@ -1283,10 +1398,10 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
       chip.title = `${f.name} · click for charts`;
       const trend = pop > popPrev ? '<span class="up">▲</span>' : pop < popPrev ? '<span class="down">▼</span>' : '';
       const live = latest.factions.filter(x => !x.extinct).length;
-      chip.innerHTML = `<span class="sw" style="background:${FACTION_COLORS[f.id]}"></span>` +
+      chip.innerHTML = bannerSvg(FACTION_COLORS[f.id] ?? '#fff', f.id) +
         (live > 5 ? `<b>${pop}</b>${trend}` :
           `<span>${f.name.split(' ')[0]}</span><b>${pop}</b>${trend}`) +
-        `${atWar.has(f.id) ? '⚔' : ''}${pop > 0 && pop < 50 ? '💀' : ''}`;
+        `${atWar.has(f.id) ? iconSvg('swords', 10) : ''}${pop > 0 && pop < 50 ? iconSvg('skull', 10) : ''}`;
       // 50y pop sparkline
       const spark = document.createElement('canvas');
       spark.width = 44; spark.height = 14;
@@ -1329,7 +1444,7 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
         const chip = document.createElement('button');
         chip.className = 'ctl';
         chip.style.cssText = `font-size:11px;padding:1px 8px;${i === warTab ? 'background:#d9576333;border-color:#d95763' : ''}`;
-        chip.textContent = `⚔ ${(w as any).name ?? latest!.factions?.[w.attacker]?.name.split(' ')[0] ?? i}`;
+        chip.innerHTML = `${iconSvg('swords', 10)} ${(w as any).name ?? latest!.factions?.[w.attacker]?.name.split(' ')[0] ?? i}`;
         chip.addEventListener('click', () => { warTab = i; warStripKey = ''; renderWarStrip(); });
         tabs.appendChild(chip);
       });
@@ -1345,9 +1460,9 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
       row.className = 'war-row';
       const wName = (w as any).name;
       row.innerHTML =
-        `<div class="hd"><span>⚔ ${wName ? `<b style="color:#d9a066">${wName}</b> · ` : ''}<span style="color:${FACTION_COLORS[w.attacker]}">${an}</span>` +
+        `<div class="hd"><span>${iconSvg('swords', 11)} ${wName ? `<b style="color:#d9a066">${wName}</b> · ` : ''}<span style="color:${FACTION_COLORS[w.attacker]}">${an}</span>` +
         ` vs <span style="color:${FACTION_COLORS[w.defender]}">${dn}</span></span>` +
-        `<span style="color:#9badb7">goal: ${w.objective}</span></div>` +
+        `<span style="color:var(--dim)">goal: ${w.objective}</span></div>` +
         (cap > 0 ? `<div class="cap"><div style="width:${cap}%"></div></div>` : '') +
         `<div class="armies"><span>${aTroops} marching</span><span>${dTroops} defending</span></div>`;
       row.addEventListener('click', () => {
@@ -1459,12 +1574,12 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
     }).sort((a, b) => b.severity - a.severity).slice(0, 4);
     if (span.length === 0) return;
     digestCard.innerHTML = `<h4>Meanwhile, ${hi - lo} years pass…</h4>` +
-      `<span style="float:right;cursor:pointer;color:#9badb7;position:absolute;top:10px;right:12px" id="digest-close">✕</span>`;
+      `<span style="float:right;cursor:pointer;color:var(--dim);position:absolute;top:10px;right:12px" id="digest-close">${iconSvg('x', 11)}</span>`;
     for (const ev of span) {
       const row = document.createElement('div');
       row.className = 'dg-row';
       const meta = eventMeta(ev.type);
-      row.innerHTML = `<span style="color:${meta.color}">${meta.glyph}</span> ${ev.text.replace(/^Y\d+: /, `Y${Math.floor(ev.tick / TICKS_PER_YEAR)}: `)}`;
+      row.innerHTML = `<span style="color:${meta.color}">${glyphHtml(meta.glyph)}</span> ${ev.text.replace(/^Y\d+: /, `Y${Math.floor(ev.tick / TICKS_PER_YEAR)}: `)}`;
       row.addEventListener('click', () => {
         renderer.camera.cx = ev.x; renderer.camera.cy = ev.y;
         worker.postMessage({ t: 'chain', eventId: ev.id });
@@ -1533,7 +1648,7 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
         el.title = `Travel to Year ${p.anchor.year}`;
         el.addEventListener('click', () => {
           renderer.camera.cx = p.anchor.x; renderer.camera.cy = p.anchor.y;
-          if (renderer.camera.level < 2) renderer.camera.level = 2;
+          if (renderer.camera.level < LEVEL_LOCAL) renderer.camera.level = LEVEL_LOCAL;
           doSeek(p.anchor.year);
         });
         chronBody.appendChild(el);
@@ -1637,7 +1752,7 @@ ${parts.join('\n')}</body>`;
         label: `${c.name}${c.dead ? ' †' : ''}, ${c.role}, ${c.faction}${c.lineage ? ` · line of ${c.lineage}` : ''}${c.kills > 2 ? ` · ${c.kills} kills` : ''}`,
         kind: 'character',
         act: () => {
-          if (!c.dead && c.x >= 0) { renderer.camera.cx = c.x; renderer.camera.cy = c.y; renderer.camera.level = 2; worker.postMessage({ t: 'inspect', x: c.x, y: c.y }); }
+          if (!c.dead && c.x >= 0) { renderer.camera.cx = c.x; renderer.camera.cy = c.y; renderer.camera.level = LEVEL_LOCAL; worker.postMessage({ t: 'inspect', x: c.x, y: c.y }); }
           else if (c.deathEventId >= 0) worker.postMessage({ t: 'chain', eventId: c.deathEventId });
         },
       });
@@ -1647,7 +1762,7 @@ ${parts.join('\n')}</body>`;
       results.push({
         label: `${p.name}${p.razed ? ' (ruins)' : ''}, ${p.faction}`,
         kind: 'place',
-        act: () => { renderer.camera.cx = p.x; renderer.camera.cy = p.y; renderer.camera.level = 2; },
+        act: () => { renderer.camera.cx = p.x; renderer.camera.cy = p.y; renderer.camera.level = LEVEL_LOCAL; },
       });
     }
     for (const c of searchIndex.chapters) {
@@ -1674,7 +1789,7 @@ ${parts.join('\n')}</body>`;
       searchResults.appendChild(el);
     }
     if (results.length === 0) {
-      searchResults.innerHTML = '<div class="sr"><span style="color:#9badb7">nothing found</span></div>';
+      searchResults.innerHTML = '<div class="sr"><span style="color:var(--dim)">nothing found</span></div>';
     }
   }
 
@@ -1718,7 +1833,7 @@ ${parts.join('\n')}</body>`;
     const meta = eventMeta((ev as any).type ?? 0);
     const span = document.createElement('span');
     span.className = `ev sev${ev.severity}`;
-    span.innerHTML = `<span style="color:${meta.color}">${meta.glyph}</span> Y${Math.floor(ev.tick / TICKS_PER_YEAR)}: ${ev.text.replace(/^Y\d+: /, '')} <span style="color:#639bff;margin-left:8px">‣ all events</span>`;
+    span.innerHTML = `<span style="color:${meta.color}">${glyphHtml(meta.glyph)}</span> Y${Math.floor(ev.tick / TICKS_PER_YEAR)}: ${ev.text.replace(/^Y\d+: /, '')} <span style="color:var(--accent);margin-left:8px">‣ all events</span>`;
     span.addEventListener('click', () => openRail('events'));
     feed.appendChild(span);
   }
@@ -1770,7 +1885,7 @@ ${parts.join('\n')}</body>`;
     if (overlayMode === '') { overlayLegend.style.display = 'none'; return; }
     overlayLegend.style.display = 'block';
     const rows: string[] = [];
-    const head = (name: string) => `<b style="letter-spacing:1px;font-size:10px;color:#9badb7">${name.toUpperCase()} OVERLAY</b>`;
+    const head = (name: string) => `<b style="letter-spacing:1px;font-size:10px;color:var(--dim)">${name.toUpperCase()} OVERLAY</b>`;
     if (overlayMode === 'territory') {
       rows.push(head('territory'));
       for (const f of latest?.factions ?? []) {
@@ -1785,15 +1900,15 @@ ${parts.join('\n')}</body>`;
       rows.push(head('war'));
       const wars = latest?.wars ?? [];
       if (wars.length === 0) {
-        rows.push('🕊 the island is at peace');
+        rows.push(`${iconSvg('dove', 11)} the island is at peace`);
       } else {
         for (const w of wars) {
           const an = latest?.factions?.[w.attacker]?.name ?? '?';
           const dn = latest?.factions?.[w.defender]?.name ?? '?';
-          rows.push(`<span style="color:#d95763">⚔</span> ${an} vs ${dn} · ${w.objective}`);
+          rows.push(`<span style="color:#d95763">${iconSvg('swords', 10)}</span> ${an} vs ${dn} · ${w.objective}`);
         }
       }
-      rows.push('<span style="color:#8f563b">✕</span> recent battle site', '<span style="color:#9badb7">hover a border for grudges</span>');
+      rows.push(`<span style="color:#8f563b">${iconSvg('swords', 10)}</span> recent battle site`, '<span style="color:var(--dim)">hover a border for grudges</span>');
     }
     overlayLegend.innerHTML = rows.join('<br>');
   }
@@ -2030,15 +2145,15 @@ ${parts.join('\n')}</body>`;
     if (seenHints.has(key) || localStorage.getItem('chronica.nohints')) return;
     seenHints.add(key);
     localStorage.setItem('chronica.hints', JSON.stringify([...seenHints]));
-    hintEl.innerHTML = `${text} <span style="color:#9badb7;cursor:pointer;margin-left:8px" id="hint-x">dismiss</span>`;
+    hintEl.innerHTML = `${text} <span style="color:var(--dim);cursor:pointer;margin-left:8px" id="hint-x">dismiss</span>`;
     hintEl.style.display = 'block';
     document.getElementById('hint-x')!.addEventListener('click', () => { hintEl.style.display = 'none'; });
     setTimeout(() => { hintEl.style.display = 'none'; }, 12000);
   }
-  setTimeout(() => showHint('welcome', '⏯ Space pauses · 1/2/3 sets speed · drag to pan, wheel to zoom.'), 4000);
-  setTimeout(() => showHint('feed', '⚔ When something happens, click it in the feed below to see WHY.'), 45000);
-  setTimeout(() => showHint('chronicle', '📖 Press C to read the history book your world is writing.'), 90000);
-  setTimeout(() => showHint('timeline', '⏪ Click anywhere on the timeline to travel back in time.'), 150000);
+  setTimeout(() => showHint('welcome', `${iconSvg('pause', 11)} Space pauses · 1/2/3 sets speed · drag to pan, wheel to zoom.`), 4000);
+  setTimeout(() => showHint('feed', `${iconSvg('swords', 11)} When something happens, click it in the feed below to see WHY.`), 45000);
+  setTimeout(() => showHint('chronicle', `${iconSvg('book', 11)} Press C to read the history book your world is writing.`), 90000);
+  setTimeout(() => showHint('timeline', `${iconSvg('undo', 11)} Click anywhere on the timeline to travel back in time.`), 150000);
 
   // ---- render loop ----
   let lastT = performance.now();
@@ -2055,6 +2170,10 @@ ${parts.join('\n')}</body>`;
     renderer.camera.update(dt);
     renderer.drawTerrain();
     drawOverlay();
+    if (latest) {
+      decals.update(majors, latest.tick);
+      decals.draw(renderer.ctx, renderer.camera, latest.tick);
+    }
     drawDynamic();
     if (latest) {
       watchStarred();
@@ -2119,81 +2238,154 @@ ${parts.join('\n')}</body>`;
     const mapAlpha = px <= 4.5 ? 1 : px >= 12 ? 0 : (12 - px) / 7.5;
     const detailAlpha = 1 - mapAlpha;
     ctx.globalAlpha = detailAlpha;
-    // crops breathe with the year (M10, 11 §B2): furrows → shoots → gold → stubble
+    // crop fields v2 (doc 14 T2.4): solid tilled patches that green up and
+    // ripen gold; the harvest season is visible from across the map
     if (detailAlpha > 0.01 && cam.pxPerTile >= 8) {
       const px2 = cam.pxPerTile;
       for (let i = 0; i + 2 < farms.length; i += 3) {
-        const [sx, sy] = cam.worldToScreen(farms[i], farms[i + 1]);
+        const fx = farms[i], fy = farms[i + 1];
+        const [sx, sy] = cam.worldToScreen(fx, fy);
         if (sx < -px2 || sy < -px2 || sx > cam.viewW || sy > cam.viewH) continue;
         const stage = farms[i + 2];
-        if (stage === 0) {
-          ctx.fillStyle = '#66393155';
-          ctx.fillRect(Math.round(sx), Math.round(sy + px2 / 3), Math.round(px2), 1);
-          ctx.fillRect(Math.round(sx), Math.round(sy + (px2 * 2) / 3), Math.round(px2), 1);
-        } else {
-          ctx.fillStyle = stage >= 200 ? '#fbf236' : stage >= 100 ? '#6abe30' : '#99e55088';
-          const h = Math.max(1, (px2 * Math.min(200, stage)) / 500);
-          for (let dx = 1; dx < px2 - 1; dx += 3) {
-            ctx.fillRect(Math.round(sx + dx), Math.round(sy + px2 - 1 - h), 1, Math.round(h));
+        const rx = Math.round(sx), ry = Math.round(sy);
+        const w = Math.round(px2);
+        // tilled soil bed, translucent so the land shows through
+        ctx.fillStyle = 'rgba(110,74,45,0.62)';
+        ctx.fillRect(rx + 1, ry + 1, w - 2, w - 2);
+        ctx.fillStyle = 'rgba(90,59,34,0.5)';
+        for (let r = 3; r < w - 1; r += 4) ctx.fillRect(rx + 1, ry + r, w - 2, 1);
+        if (stage > 0) {
+          // crop rows on the soil: sprout green -> lush -> ripe gold
+          const grown = Math.min(1, stage / 200);
+          const col = stage >= 200 ? '#e3c25a' : stage >= 100 ? '#a4c957' : '#8fd15f';
+          ctx.fillStyle = col;
+          const rowH = Math.max(1, Math.round(w * 0.26 * grown + 1));
+          for (let r = 3; r < w - 1; r += 4) {
+            ctx.fillRect(rx + 1, ry + r - rowH + 1, w - 2, rowH);
           }
-        }
-      }
-    }
-    // buildings (M10, 11 §B1): race-flavored sprites at Local zoom,
-    // colored blocks at hybrid zoom, scaffold overlay while under construction
-    if (detailAlpha > 0.01 && cam.pxPerTile >= 4) {
-      const useSpritesB = cam.pxPerTile >= 16;
-      for (const st of latest.settlements) {
-        if (st.razed) continue;
-        const race = latest.factions?.[st.factionId]?.race ?? 0;
-        for (const b of st.buildings) {
-          const [sx, sy] = cam.worldToScreen(b.x, b.y);
-          if (sx < -40 || sy < -40 || sx > cam.viewW + 40 || sy > cam.viewH + 40) continue;
-          if (useSpritesB) {
-            const cell = buildingAtlas.index[`${race}:${b.kind}`];
-            if (cell) {
-              const sc = cam.pxPerTile / BUILDING_CELL;
-              const flip = ((b.x * 31 + b.y * 17) & 1) === 1;   // V5: variety by mirror
-              if (flip) {
-                ctx.save();
-                ctx.translate(Math.round(sx) + Math.round(BUILDING_CELL * sc), Math.round(sy));
-                ctx.scale(-1, 1);
-                ctx.drawImage(buildingAtlas.canvas as CanvasImageSource,
-                  cell.x, cell.y, BUILDING_CELL, BUILDING_CELL,
-                  0, 0, Math.round(BUILDING_CELL * sc), Math.round(BUILDING_CELL * sc));
-                ctx.restore();
-              } else {
-                ctx.drawImage(buildingAtlas.canvas as CanvasImageSource,
-                  cell.x, cell.y, BUILDING_CELL, BUILDING_CELL,
-                  Math.round(sx), Math.round(sy), Math.round(BUILDING_CELL * sc), Math.round(BUILDING_CELL * sc));
-              }
-              if (b.stage < 3) {
-                const sca = buildingAtlas.index['scaffold'];
-                ctx.drawImage(buildingAtlas.canvas as CanvasImageSource,
-                  sca.x, sca.y, BUILDING_CELL, BUILDING_CELL,
-                  Math.round(sx), Math.round(sy), Math.round(BUILDING_CELL * sc), Math.round(BUILDING_CELL * sc));
-              }
-              continue;
+          if (stage >= 200) {
+            // ripple of ripe-grain highlights
+            ctx.fillStyle = '#fbf236';
+            for (let dx2 = 2; dx2 < w - 2; dx2 += 5) {
+              ctx.fillRect(rx + dx2, ry + 2 + ((dx2 * 7) % (w - 4)), 1, 2);
             }
           }
-          const sz = Math.max(2, cam.pxPerTile * (b.stage === 3 ? 0.9 : 0.4 + b.stage * 0.15));
-          ctx.fillStyle = b.kind === 1 ? '#8a6f30' : b.kind === 2 ? '#847e87' : '#663931';
-          ctx.fillRect(Math.round(sx), Math.round(sy), Math.round(sz), Math.round(sz));
         }
       }
     }
-    // settlement markers (hybrid/local zoom; map mode owns far zoom)
+    // buildings v2 (doc 14 T2.2/T2.3/D10): multi-tile sprites, y-sorted, with
+    // intra-settlement paths, plaza + tier dressing, prosperity materials
+    if (detailAlpha > 0.01 && cam.pxPerTile >= 4) {
+      const useSpritesB = cam.pxPerTile >= 8;
+      const B = BUILDING_CELL;
+      const drawCell = (key: string, wx: number, wy: number, flip: boolean, scaffold: boolean) => {
+        const cell = buildingAtlas.index[key];
+        if (!cell) return false;
+        const sc = cam.pxPerTile / 8;
+        const w = Math.round(B * sc), h = Math.round(B * sc);
+        const [sx, sy] = cam.worldToScreen(wx, wy);
+        const dx = Math.round(sx + cam.pxPerTile / 2 - w / 2);
+        const dy = Math.round(sy + cam.pxPerTile - h);
+        if (dx < -w || dy < -h || dx > cam.viewW + w || dy > cam.viewH + h) return true;
+        if (flip) {
+          ctx.save();
+          ctx.translate(dx + w, dy);
+          ctx.scale(-1, 1);
+          ctx.drawImage(buildingAtlas.canvas as CanvasImageSource, cell.x, cell.y, B, B, 0, 0, w, h);
+          ctx.restore();
+        } else {
+          ctx.drawImage(buildingAtlas.canvas as CanvasImageSource, cell.x, cell.y, B, B, dx, dy, w, h);
+        }
+        if (scaffold) {
+          const sca = buildingAtlas.index['scaffold'];
+          ctx.drawImage(buildingAtlas.canvas as CanvasImageSource, sca.x, sca.y, B, B, dx, dy, w, h);
+        }
+        return true;
+      };
+      for (const st of latest.settlements) {
+        if (st.razed) continue;
+        const [scx, scy] = cam.worldToScreen(st.x + 0.5, st.y + 0.5);
+        const cullM = 16 * cam.pxPerTile + 100;   // towns span up to ~14 tiles from center
+        if (scx < -cullM || scy < -cullM || scx > cam.viewW + cullM || scy > cam.viewH + cullM) continue;
+        const race = latest.factions?.[st.factionId]?.race ?? 0;
+        const tier = popTier(st.pop);
+        const mat = tier >= 2 ? 1 : 0;
+        const isCapital = latest.factions?.[st.factionId]?.capital === st.id;
+        if (useSpritesB) {
+          // streets: an L of packed earth from every door to the plaza
+          ctx.strokeStyle = 'rgba(216,201,160,0.34)';
+          ctx.lineWidth = Math.max(2, cam.pxPerTile * 0.22);
+          ctx.beginPath();
+          for (const b of st.buildings) {
+            if (b.kind === 5 || b.kind === 4) continue;
+            const [bx, by] = cam.worldToScreen(b.x + 0.5, b.y + 0.5);
+            ctx.moveTo(Math.round(bx), Math.round(by));
+            ctx.lineTo(Math.round(bx), Math.round(scy));
+            ctx.lineTo(Math.round(scx), Math.round(scy));
+          }
+          ctx.stroke();
+          // plaza of packed earth at the heart of town
+          ctx.fillStyle = 'rgba(216,201,160,0.45)';
+          ctx.beginPath();
+          ctx.ellipse(scx, scy, cam.pxPerTile * 1.15, cam.pxPerTile * 0.8, 0, 0, 7);
+          ctx.fill();
+          // y-sorted architecture
+          const bs = [...st.buildings].sort((a, b) => a.y - b.y || a.x - b.x);
+          for (const b of bs) {
+            if (b.kind === 4) continue;             // farms are field tiles
+            const flip = b.kind !== 5 && ((b.x * 31 + b.y * 17) & 1) === 1;
+            if (!drawCell(`${race}:${st.factionId}:${b.kind}:${mat}`, b.x, b.y, flip, b.stage < 3)) {
+              const sz = Math.max(2, cam.pxPerTile * 0.9);
+              const [sx, sy] = cam.worldToScreen(b.x, b.y);
+              ctx.fillStyle = '#663931';
+              ctx.fillRect(Math.round(sx), Math.round(sy), Math.round(sz), Math.round(sz));
+            }
+          }
+          // prosperity dressing (D10): well -> stalls/statue -> fountain + keep
+          if (tier >= 3) drawCell('fountain', st.x, st.y, false, false);
+          else if (tier >= 1) drawCell('well', st.x, st.y, false, false);
+          if (tier >= 2) {
+            drawCell(`stall:${st.factionId}`, st.x - 2, st.y + 1, false, false);
+            drawCell(`stall:${st.factionId}`, st.x + 2, st.y + 1, true, false);
+            if (isCapital) drawCell('statue', st.x + 1, st.y - 1, false, false);
+          }
+          if (isCapital && tier >= 2) {
+            drawCell(`${race}:${st.factionId}:6:1`, st.x, st.y - 2, false, false);
+          }
+        } else {
+          // hybrid zoom: compact colored blocks
+          for (const b of st.buildings) {
+            if (b.kind === 4) continue;
+            const [sx, sy] = cam.worldToScreen(b.x, b.y);
+            if (sx < -8 || sy < -8 || sx > cam.viewW + 8 || sy > cam.viewH + 8) continue;
+            const sz = Math.max(2, cam.pxPerTile * (b.stage === 3 ? 0.9 : 0.4 + b.stage * 0.15));
+            ctx.fillStyle = b.kind === 1 ? '#8a6f30' : b.kind === 2 ? '#847e87' : '#663931';
+            ctx.fillRect(Math.round(sx), Math.round(sy), Math.round(sz), Math.round(sz));
+          }
+        }
+      }
+    }
+    // settlement labels (hybrid/local zoom; map mode owns far zoom)
     if (detailAlpha > 0.01) for (const st of latest.settlements) {
       if (st.razed) continue;
       const [sx, sy] = cam.worldToScreen(st.x + 0.5, st.y + 0.5);
       if (sx < -20 || sy < -20 || sx > cam.viewW + 20 || sy > cam.viewH + 20) continue;
-      ctx.fillStyle = FACTION_COLORS[st.factionId] ?? '#fff';
-      const r = Math.max(3, cam.pxPerTile * 0.6);
-      ctx.fillRect(Math.round(sx - r / 2), Math.round(sy - r / 2), Math.round(r), Math.round(r));
+      if (cam.pxPerTile >= 4 && cam.pxPerTile < 8) {
+        ctx.fillStyle = FACTION_COLORS[st.factionId] ?? '#fff';
+        const r = Math.max(3, cam.pxPerTile * 0.6);
+        ctx.fillRect(Math.round(sx - r / 2), Math.round(sy - r / 2), Math.round(r), Math.round(r));
+      }
       if (cam.pxPerTile >= 4) {
-        ctx.fillStyle = '#cbdbfc';
-        ctx.font = '11px system-ui';
-        ctx.fillText(st.name, Math.round(sx + r), Math.round(sy - 4));
+        const label = st.name;
+        ctx.font = '600 11px system-ui';
+        const tw = ctx.measureText(label).width;
+        const lx = Math.round(sx - tw / 2), ly = Math.round(sy - cam.pxPerTile * 1.9 - 8);
+        ctx.fillStyle = 'rgba(15,16,26,0.62)';
+        ctx.fillRect(lx - 4, ly - 10, tw + 8, 14);
+        ctx.fillStyle = FACTION_COLORS[st.factionId] ?? '#fff';
+        ctx.fillRect(lx - 4, ly - 10, 2, 14);
+        ctx.fillStyle = '#e8e4d8';
+        ctx.fillText(label, lx, ly + 1);
       }
     }
     // squads as banner units (11 §A1): faction flag, morale = flag fullness,
@@ -2216,57 +2408,243 @@ ${parts.join('\n')}</body>`;
       ctx.fillStyle = '#cbdbfc';
       ctx.fillText(cnt, Math.round(sx), Math.round(sy) + 11);
       if (sq.state === 'fight') {
-        // dust of battle: breathing haze under the clash icon
+        // dust of battle: breathing haze under the engagement
         const puff = 6 + 3 * Math.sin(performance.now() / 180 + sq.x);
-        ctx.globalAlpha = 0.28;
+        ctx.globalAlpha = 0.22;
         ctx.fillStyle = '#847e87';
         ctx.beginPath(); ctx.arc(sx + 4, sy - 2, puff + 6, 0, 7); ctx.fill();
         ctx.globalAlpha = 1;
-        const sw = mapIcons.index['swords'];
-        ctx.drawImage(mapIcons.canvas as CanvasImageSource, sw.x, sw.y, ICON_W, ICON_H,
-          Math.round(sx - 16), Math.round(sy - h2 - 24), 32, 26);
+        // combat v2 (doc 14 T3.2): render the fight itself; individual
+        // soldiers in fight frames, facing the nearest enemy squad, with
+        // weapon-flash pixels and arrow streaks between the hosts
+        if (cam.pxPerTile >= 8 && latest) {
+          const enemy = (latest.squads ?? []).find(q =>
+            q !== sq && q.factionId !== sq.factionId && q.state === 'fight' &&
+            Math.abs(q.x - sq.x) + Math.abs(q.y - sq.y) < 8);
+          const faceLeft = enemy ? (enemy.x < sq.x ? 1 : 0) : (sq.x & 1);
+          const race = latest.factions?.[sq.factionId]?.race ?? 0;
+          const s3 = Math.max(1, Math.floor(cam.pxPerTile / 16));
+          const nDraw = Math.min(10, sq.n);
+          for (let d = 0; d < nDraw; d++) {
+            const seed = hash3(sq.factionId * 64 + d, sq.x | 0, sq.y | 0);
+            const offX = (((seed & 15) - 7.5) / 6) * cam.pxPerTile;
+            const offY = ((((seed >> 4) & 15) - 7.5) / 7) * cam.pxPerTile;
+            const ph = ((latest.tick >> 1) + d) & 1;
+            const cellD = atlas.index[`${race}:${sq.factionId}:soldier:0:${ph ? 2 : 1}:${faceLeft}`];
+            if (!cellD) continue;
+            const dxp = Math.round(sx + offX - SPRITE_W * s3 / 2);
+            const dyp = Math.round(sy + offY - SPRITE_H * s3 + 4);
+            ctx.drawImage(atlas.canvas as CanvasImageSource, cellD.x, cellD.y, SPRITE_W, SPRITE_H,
+              dxp, dyp, SPRITE_W * s3, SPRITE_H * s3);
+            if (ph) {           // weapon flash at the strike beat
+              ctx.fillStyle = '#ffffff';
+              ctx.fillRect(dxp + (faceLeft ? -1 : SPRITE_W * s3), dyp + 2 * s3, 2, 2);
+            }
+          }
+          // the fallen: corpse sprites (frame 3) at the fringe of the melee,
+          // scaling with how bloodied the host is (doc 14 T3.2 aftermath)
+          const fallen = Math.min(3, sq.n >> 3);
+          for (let d = 0; d < fallen; d++) {
+            const seed = hash3(sq.factionId * 64 + 40 + d, sq.x | 0, sq.y | 0);
+            const offX = (((seed & 15) - 7.5) / 4) * cam.pxPerTile;
+            const offY = ((((seed >> 4) & 15) - 3) / 5) * cam.pxPerTile;
+            const cellF = atlas.index[`${race}:${sq.factionId}:none:0:3:${(seed >> 8) & 1}`];
+            if (!cellF) continue;
+            ctx.drawImage(atlas.canvas as CanvasImageSource, cellF.x, cellF.y, SPRITE_W, SPRITE_H,
+              Math.round(sx + offX - SPRITE_W * s3 / 2), Math.round(sy + offY - SPRITE_H * s3 + 4),
+              SPRITE_W * s3, SPRITE_H * s3);
+          }
+          if (enemy) {
+            // arrows arc between the hosts
+            const [ex, ey] = cam.worldToScreen(enemy.x, enemy.y);
+            ctx.strokeStyle = 'rgba(238,225,200,0.75)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            for (let k2 = 0; k2 < 3; k2++) {
+              const t2 = ((latest.tick * 3 + k2 * 41 + (hash3(sq.factionId, k2, 7) & 63)) % 32) / 32;
+              const ax = sx + (ex - sx) * t2, ay = sy + (ey - sy) * t2 - Math.sin(t2 * Math.PI) * cam.pxPerTile * 1.2;
+              ctx.moveTo(ax, ay);
+              ctx.lineTo(ax + (ex > sx ? 4 : -4), ay + 1);
+            }
+            ctx.stroke();
+          }
+        } else {
+          const sw = mapIcons.index['swords'];
+          ctx.drawImage(mapIcons.canvas as CanvasImageSource, sw.x, sw.y, ICON_W, ICON_H,
+            Math.round(sx - 16), Math.round(sy - h2 - 24), 32, 26);
+        }
       }
       if (sq.state === 'siege') {
+        // siege encampment (doc 14 T3b.5): tents + campfire ring the besieger
+        const fc = FACTION_COLORS[sq.factionId] ?? '#fff';
+        for (let t3 = 0; t3 < 3; t3++) {
+          const seed3 = hash3(sq.factionId, t3, (sq.x | 0) * 31 + (sq.y | 0));
+          const tx2 = sx + (((seed3 & 15) - 7.5) / 4) * cam.pxPerTile;
+          const ty2 = sy + ((((seed3 >> 4) & 15) - 4) / 5) * cam.pxPerTile + cam.pxPerTile * 0.8;
+          const ts = Math.max(4, cam.pxPerTile * 0.5);
+          ctx.fillStyle = fc;
+          ctx.beginPath();
+          ctx.moveTo(tx2, ty2 - ts);
+          ctx.lineTo(tx2 - ts * 0.7, ty2);
+          ctx.lineTo(tx2 + ts * 0.7, ty2);
+          ctx.closePath();
+          ctx.fill();
+          ctx.fillStyle = '#222034';
+          ctx.fillRect(Math.round(tx2 - 1), Math.round(ty2 - ts * 0.4), 2, Math.round(ts * 0.4));
+        }
+        // campfire flicker (tick parity: replay-safe)
+        const fl = (latest.tick >> 1) & 1;
+        ctx.fillStyle = fl ? '#ff7b26' : '#ffd23f';
+        const fs2 = Math.max(2, cam.pxPerTile * 0.25);
+        ctx.fillRect(Math.round(sx + cam.pxPerTile * 0.9), Math.round(sy + cam.pxPerTile * 0.5), fs2, fs2);
         const ca = mapIcons.index['m:castle'];
         ctx.drawImage(mapIcons.canvas as CanvasImageSource, ca.x, ca.y, ICON_W, ICON_H,
           Math.round(sx - 14), Math.round(sy - h2 - 22), 28, 23);
       }
+      if (sq.state === 'march' && sq.warId !== undefined && sq.warId >= 0) {
+        // march intent (doc 14 T3b.5): faint dashed trail toward the likely
+        // objective, the nearest enemy settlement of this war
+        const war = latest.wars?.find(w => w.id === sq.warId);
+        if (war) {
+          const enemyF = war.attacker === sq.factionId ? war.defender : war.attacker;
+          let best: { x: number; y: number } | null = null;
+          let bestD = Infinity;
+          for (const st of latest.settlements) {
+            if (st.razed || st.factionId !== enemyF) continue;
+            const d2 = (st.x - sq.x) * (st.x - sq.x) + (st.y - sq.y) * (st.y - sq.y);
+            if (d2 < bestD) { bestD = d2; best = st; }
+          }
+          if (best) {
+            const [tx3, ty3] = cam.worldToScreen(best.x + 0.5, best.y + 0.5);
+            ctx.globalAlpha = 0.35 * detailAlpha;
+            ctx.strokeStyle = FACTION_COLORS[sq.factionId] ?? '#fff';
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([5, 7]);
+            ctx.beginPath();
+            ctx.moveTo(sx, sy);
+            ctx.lineTo(tx3, ty3);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.globalAlpha = detailAlpha;
+          }
+        }
+      }
     }
-    // aftermath (11 §A5): razed sites smolder for ~2 years of sim time,
-    // derived from the event log so time-machine scrubs replay the smoke
+    // aftermath v2 (doc 14 T5.2): razed sites BURN for the first half-year
+    // (flames + warm glow + embers), then smolder; rubble decals carry the
+    // ruin from there. All derived from the event log: scrub-safe.
     if (detailAlpha > 0.01) for (const ev of majors) {
       if (ev.type !== 3) continue;                       // SettlementRazed
       const age = latest.tick - ev.tick;
       if (age < 0 || age > 2 * TICKS_PER_YEAR) continue;
       const [sx, sy] = cam.worldToScreen(ev.x + 0.5, ev.y + 0.5);
-      if (sx < -40 || sy < -40 || sx > cam.viewW + 40 || sy > cam.viewH + 40) continue;
+      if (sx < -60 || sy < -60 || sx > cam.viewW + 60 || sy > cam.viewH + 60) continue;
       const fade = 1 - age / (2 * TICKS_PER_YEAR);
-      ctx.globalAlpha = 0.5 * fade;
-      ctx.fillStyle = '#000000';
-      ctx.fillRect(Math.round(sx - cam.pxPerTile * 2), Math.round(sy - cam.pxPerTile), Math.round(cam.pxPerTile * 4), Math.round(cam.pxPerTile * 2));
-      for (let p = 0; p < 3; p++) {
-        const t = (performance.now() / 900 + p * 0.33) % 1;
-        ctx.globalAlpha = 0.4 * fade * (1 - t);
-        ctx.fillStyle = '#222034';
-        const r = 3 + t * 7;
+      const burning = age < TICKS_PER_YEAR / 2;
+      if (burning) {
+        const burn01 = 1 - age / (TICKS_PER_YEAR / 2);
+        // warm light pool (screen blend is cheap at one gradient per site)
+        const R = cam.pxPerTile * 3.2;
+        const glow = ctx.createRadialGradient(sx, sy, R * 0.1, sx, sy, R);
+        glow.addColorStop(0, `rgba(255,150,50,${0.34 * burn01})`);
+        glow.addColorStop(1, 'rgba(255,120,30,0)');
+        ctx.globalAlpha = detailAlpha;
+        ctx.fillStyle = glow;
+        ctx.beginPath(); ctx.arc(sx, sy, R, 0, 7); ctx.fill();
+        // 2-frame flame tongues scattered over the site
+        const ffr = (latest.tick >> 1) & 1;
+        for (let f2 = 0; f2 < 6; f2++) {
+          const seed4 = hash3(ev.id, f2, 11);
+          const ox2 = (((seed4 & 31) - 15.5) / 8) * cam.pxPerTile;
+          const oy2 = ((((seed4 >> 5) & 15) - 7.5) / 8) * cam.pxPerTile;
+          const fh = Math.max(3, cam.pxPerTile * (0.5 + ((seed4 >> 9) & 3) * 0.12)) * (ffr ? 1 : 0.8);
+          ctx.fillStyle = '#d33d2e';
+          ctx.fillRect(Math.round(sx + ox2 - 2), Math.round(sy + oy2 - fh), 4, Math.round(fh));
+          ctx.fillStyle = '#ff7b26';
+          ctx.fillRect(Math.round(sx + ox2 - 1), Math.round(sy + oy2 - fh * 0.75), 2, Math.round(fh * 0.75));
+          ctx.fillStyle = '#ffd23f';
+          ctx.fillRect(Math.round(sx + ox2), Math.round(sy + oy2 - fh * 0.4), 1, Math.round(fh * 0.4));
+          // ember spark rising on the flicker beat
+          if (((seed4 + ffr) & 3) === 0) {
+            ctx.fillStyle = '#ffd23f';
+            ctx.fillRect(Math.round(sx + ox2 + 2), Math.round(sy + oy2 - fh - 3), 1, 1);
+          }
+        }
+      } else {
+        ctx.globalAlpha = 0.4 * fade;
+        ctx.fillStyle = '#14100c';
+        ctx.fillRect(Math.round(sx - cam.pxPerTile * 2), Math.round(sy - cam.pxPerTile), Math.round(cam.pxPerTile * 4), Math.round(cam.pxPerTile * 2));
+      }
+      // smoke column, thicker while burning
+      for (let p = 0; p < (burning ? 4 : 3); p++) {
+        const t = (performance.now() / 900 + p * 0.29) % 1;
+        ctx.globalAlpha = (burning ? 0.55 : 0.4) * fade * (1 - t);
+        ctx.fillStyle = burning ? '#3a3242' : '#222034';
+        const r = 3 + t * (burning ? 10 : 7);
         ctx.beginPath();
-        ctx.arc(sx + (p - 1) * 6 + Math.sin(t * 6 + p) * 3, sy - 6 - t * 26, r, 0, 7);
+        ctx.arc(sx + (p - 1) * 6 + Math.sin(t * 6 + p) * 3, sy - 6 - t * (burning ? 34 : 26), r, 0, 7);
         ctx.fill();
       }
       ctx.globalAlpha = detailAlpha;
     }
+    // caravans v2 (doc 14 T3b.2): wagon + draft ox + faction pennant
     for (const c of latest.caravans ?? []) {
       const [sx, sy] = cam.worldToScreen(c.x, c.y);
-      if (sx < -10 || sy < -10 || sx > cam.viewW + 10 || sy > cam.viewH + 10) continue;
-      ctx.fillStyle = '#d9a066';
-      const r = Math.max(2, cam.pxPerTile * 0.4);
-      ctx.fillRect(Math.round(sx - r / 2), Math.round(sy - r / 2), Math.round(r), Math.round(r * 0.7));
-      ctx.fillStyle = FACTION_COLORS[c.factionId] ?? '#fff';
-      ctx.fillRect(Math.round(sx - r / 2), Math.round(sy - r), Math.round(r * 0.5), Math.round(r * 0.4));
+      if (sx < -20 || sy < -20 || sx > cam.viewW + 20 || sy > cam.viewH + 20) continue;
+      if (cam.pxPerTile >= 8) {
+        const u2 = cam.pxPerTile / 8;
+        const rx = Math.round(sx - 4 * u2), ry = Math.round(sy - 3 * u2);
+        // shadow
+        ctx.globalAlpha = 0.25 * detailAlpha;
+        ctx.fillStyle = '#14141f';
+        ctx.fillRect(rx, Math.round(sy + u2), Math.round(9 * u2), Math.max(1, Math.round(u2)));
+        ctx.globalAlpha = detailAlpha;
+        // ox
+        ctx.fillStyle = '#8f563b';
+        ctx.fillRect(Math.round(sx + 4 * u2), Math.round(sy - u2), Math.round(3 * u2), Math.round(2 * u2));
+        // cart bed + canopy
+        ctx.fillStyle = '#7c4f2a';
+        ctx.fillRect(rx, ry + Math.round(2 * u2), Math.round(6 * u2), Math.round(2 * u2));
+        ctx.fillStyle = FACTION_COLORS[c.factionId] ?? '#fff';
+        ctx.fillRect(rx, ry, Math.round(6 * u2), Math.round(2 * u2));
+        // wheels
+        ctx.fillStyle = '#222034';
+        ctx.fillRect(rx + Math.round(u2 * 0.5), Math.round(sy), Math.round(1.4 * u2), Math.round(1.4 * u2));
+        ctx.fillRect(rx + Math.round(4 * u2), Math.round(sy), Math.round(1.4 * u2), Math.round(1.4 * u2));
+      } else {
+        ctx.fillStyle = '#d9a066';
+        const r = Math.max(2, cam.pxPerTile * 0.4);
+        ctx.fillRect(Math.round(sx - r / 2), Math.round(sy - r / 2), Math.round(r), Math.round(r * 0.7));
+        ctx.fillStyle = FACTION_COLORS[c.factionId] ?? '#fff';
+        ctx.fillRect(Math.round(sx - r / 2), Math.round(sy - r), Math.round(r * 0.5), Math.round(r * 0.4));
+      }
     }
+    // monsters v2 (doc 14 T3.3): multi-tile animated creatures with a ground
+    // shadow at detail zoom; the far map keeps its small glyphs
     for (const m of latest.monsters ?? []) {
       const [sx, sy] = cam.worldToScreen(m.x, m.y);
-      if (sx < -30 || sy < -30 || sx > cam.viewW + 30 || sy > cam.viewH + 30) continue;
+      if (sx < -80 || sy < -80 || sx > cam.viewW + 80 || sy > cam.viewH + 80) continue;
+      if (cam.pxPerTile >= 8) {
+        const mf = ((latest.tick >> 2) + ((m.x | 0) * 7)) & 1;
+        const cell = monsterAtlas.index[`${m.kind}:${mf}`];
+        if (cell) {
+          const msc = (cam.pxPerTile / 8) * (m.kind === 'dragon' ? 1.35 : m.kind === 'troll' ? 1 : 0.8);
+          const w = MONSTER_W * msc, h = MONSTER_H * msc;
+          // shadow: dragons fly, so theirs is offset and smaller
+          const flying = m.kind === 'dragon';
+          ctx.globalAlpha = 0.3;
+          ctx.fillStyle = '#14141f';
+          ctx.beginPath();
+          ctx.ellipse(sx + (flying ? w * 0.12 : 0), sy + h * (flying ? 0.55 : 0.4),
+            w * (flying ? 0.22 : 0.32), h * 0.12, 0, 0, 7);
+          ctx.fill();
+          ctx.globalAlpha = detailAlpha;
+          const hover = flying ? Math.sin(performance.now() / 300) * cam.pxPerTile * 0.2 : 0;
+          ctx.drawImage(monsterAtlas.canvas as CanvasImageSource, cell.x, cell.y, MONSTER_W, MONSTER_H,
+            Math.round(sx - w / 2), Math.round(sy - h * 0.6 + hover), Math.round(w), Math.round(h));
+          continue;
+        }
+      }
       const cell = mapIcons.index[`m:${m.kind}`];
       if (cell) {
         const msc = Math.max(2, cam.pxPerTile / 6) * (m.kind === 'dragon' ? 1.5 : 1);
@@ -2275,31 +2653,78 @@ ${parts.join('\n')}</body>`;
       }
     }
 
-    // pawns: dots at region zoom, sprites at local/close
+    // pawns v2 (doc 14 T3.1/D7): animated sprites at local/close zoom, frames
+    // picked from (index, tick) parity so replay scrubs draw identical crowds
     if (detailAlpha > 0.01 && cam.pxPerTile >= 4) {
       const p = latest.pawns;
       const useSprites = cam.pxPerTile >= 16;
-      const spriteScale = cam.pxPerTile >= 32 ? 2 : 1;
+      const s = Math.max(1, Math.floor(cam.pxPerTile / 16));
       for (let i = 0; i < p.count; i++) {
         if (!(p.flags[i] & 1)) continue;
         const [sx, sy] = cam.worldToScreen(p.x[i] + 0.5, p.y[i] + 0.5);
-        if (sx < -32 || sy < -32 || sx > cam.viewW + 32 || sy > cam.viewH + 32) continue;
+        if (sx < -48 || sy < -48 || sx > cam.viewW + 48 || sy > cam.viewH + 48) continue;
         if (useSprites) {
           const race = latest.factions?.[p.factionId[i]]?.race ?? 0;
           const variant = (p.flags[i] & 128) ? 2 : (p.flags[i] & 32) ? 1 : 0;
           const job = variant === 2 ? 'none' : actionToJob(p.action[i]);
-          const cell = atlas.index[`${race}:${p.factionId[i]}:${job}:${variant}`];
+          const anim = pawnAnim[i] ?? 0;
+          const facing = (anim >> 1) & 1;
+          const phase = ((latest.tick >> 2) + i) & 1;
+          let frame = 0;
+          if (p.action[i] === 17) frame = phase ? 2 : 1;                       // fighting
+          else if (anim & 1) frame = phase ? 1 : 0;                             // walking
+          else if (job !== 'none') frame = ((latest.tick >> 3) + i) & 1 ? 2 : 0; // working
+          const cell = atlas.index[`${race}:${p.factionId[i]}:${job}:${variant}:${frame}:${facing}`];
           if (cell) {
-            // work animation (M10, 11 §B3): laborers bob with their tools
-            const bob = job !== 'none' ? (performance.now() >> 8) & 1 : 0;
             ctx.drawImage(atlas.canvas as CanvasImageSource, cell.x, cell.y, SPRITE_W, SPRITE_H,
-              Math.round(sx - SPRITE_W * spriteScale / 2), Math.round(sy - SPRITE_H * spriteScale + 2 - bob),
-              SPRITE_W * spriteScale, SPRITE_H * spriteScale);
+              Math.round(sx - SPRITE_W * s / 2),
+              Math.round(sy - SPRITE_H * s + cam.pxPerTile * 0.45),
+              SPRITE_W * s, SPRITE_H * s);
           }
         } else {
+          // motion hierarchy (doc 14 D9): idle townsfolk fold into the town
+          // vignette below 16px; only travelers cross the open map as dots
+          if (((pawnAnim[i] ?? 0) & 5) === 4) continue;
           ctx.fillStyle = ['#cbdbfc', '#99e550', '#eec39a', '#d95763'][p.factionId[i]] ?? '#fff';
-          ctx.fillRect(Math.round(sx), Math.round(sy), 1, 1);
+          ctx.fillRect(Math.round(sx), Math.round(sy), 2, 2);
         }
+      }
+    }
+    // town-life vignettes (doc 14 T3b.3): plaza crowds sized by population
+    // replace the suppressed ambient dots at strategic zooms
+    if (detailAlpha > 0.01 && cam.pxPerTile >= 4 && cam.pxPerTile < 16) {
+      for (const st of latest.settlements) {
+        if (st.razed) continue;
+        const [vx, vy] = cam.worldToScreen(st.x + 0.5, st.y + 0.5);
+        if (vx < -60 || vy < -60 || vx > cam.viewW + 60 || vy > cam.viewH + 60) continue;
+        const n = Math.min(10, Math.max(2, Math.round(st.pop / 30)));
+        for (let d = 0; d < n; d++) {
+          const seed2 = hash3(st.id, d, 5);
+          const ang = ((seed2 & 63) / 63) * 6.28 + (((latest.tick >> 4) + d) % 6) * 0.09;
+          const rr = (0.7 + ((seed2 >> 6) & 31) / 31 * 1.6) * cam.pxPerTile;
+          ctx.fillStyle = (seed2 & 4) ? '#e8e4d8' : FACTION_COLORS[st.factionId] ?? '#fff';
+          ctx.fillRect(Math.round(vx + Math.cos(ang) * rr), Math.round(vy + Math.sin(ang) * rr * 0.7), 2, 2);
+        }
+      }
+    }
+    // protagonists (doc 14 T3b.4): named characters carry a name banner
+    if (detailAlpha > 0.01 && cam.pxPerTile >= 16 && latest.namedPos) {
+      ctx.font = '600 10px system-ui';
+      let shown = 0;
+      for (const ch of latest.namedPos) {
+        if (shown >= 8) break;
+        if (ch.x < 0) continue;
+        const [nx, ny] = cam.worldToScreen(ch.x + 0.5, ch.y + 0.5);
+        if (nx < 0 || ny < 0 || nx > cam.viewW || ny > cam.viewH) continue;
+        const tw = ctx.measureText(ch.name).width;
+        const lx = Math.round(nx - tw / 2), ly = Math.round(ny - SPRITE_H * Math.max(1, Math.floor(cam.pxPerTile / 16)) - 14);
+        ctx.fillStyle = 'rgba(15,16,26,0.72)';
+        ctx.fillRect(lx - 4, ly - 9, tw + 8, 13);
+        ctx.fillStyle = '#fbf236';
+        ctx.fillRect(lx - 4, ly - 9, 2, 13);
+        ctx.fillStyle = '#f4e8c8';
+        ctx.fillText(ch.name, lx, ly + 1);
+        shown++;
       }
     }
     ctx.globalAlpha = 1;

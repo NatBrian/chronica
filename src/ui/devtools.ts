@@ -107,7 +107,7 @@ export function mountSpritePreview(): void {
     root.appendChild(row);
     for (const scale of scales) {
       const c = document.createElement('canvas');
-      const cols = 4 * JOBS.length * 3;
+      const cols = 4 * JOBS.length * 3 * 4;
       c.width = cols * (SPRITE_W + 2) * scale;
       c.height = (SPRITE_H + 8) * scale;
       c.style.cssText = 'image-rendering:pixelated;border:1px solid #34345230';
@@ -125,10 +125,14 @@ export function mountSpritePreview(): void {
       for (let faction = 0; faction < 4; faction++) {
         for (const job of JOBS) {
           for (let v = 0; v < 3; v++) {
-            const { x, y } = atlas.index[`${race}:${faction}:${job}:${v}`];
-            ctx.drawImage(atlas.canvas as CanvasImageSource, x, y, SPRITE_W, SPRITE_H,
-              col * (SPRITE_W + 2) * scale, 4 * scale, SPRITE_W * scale, SPRITE_H * scale);
-            col++;
+            // v3 atlas: show all 4 frames (idle/walk/act/down) facing right
+            for (let f = 0; f < 4; f++) {
+              const cell = atlas.index[`${race}:${faction}:${job}:${v}:${f}:0`];
+              if (!cell) continue;
+              ctx.drawImage(atlas.canvas as CanvasImageSource, cell.x, cell.y, SPRITE_W, SPRITE_H,
+                col * (SPRITE_W + 2) * scale, 4 * scale, SPRITE_W * scale, SPRITE_H * scale);
+              col++;
+            }
           }
         }
       }
@@ -147,7 +151,7 @@ export function mountSpritePreview(): void {
   const ctx = c.getContext('2d')!;
   ctx.imageSmoothingEnabled = false;
   for (let race = 0; race < 4; race++) {
-    const { x, y } = atlas.index[`${race}:0:none:0`];
+    const { x, y } = atlas.index[`${race}:0:none:0:0:0`];
     ctx.drawImage(atlas.canvas as CanvasImageSource, x, y, SPRITE_W, SPRITE_H,
       race * (SPRITE_W + 4) * 8, 0, SPRITE_W * 8, SPRITE_H * 8);
   }
