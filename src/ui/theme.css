@@ -311,6 +311,22 @@ button.ctl.active { background: var(--accent); color: var(--ink); border-color: 
   #search-input { font-size: 18px; padding: 14px 16px; }
   #inspector .close { font-size: 18px; padding: 4px; }
 }
+/* short landscape phones (wide but tiny height): compact chrome like portrait */
+@media (pointer: coarse) and (max-height: 520px) {
+  #hud-factions { left: auto; right: 6px; transform: none; justify-content: flex-end;
+    max-width: 46vw; top: 6px; gap: 3px; }
+  .fhud > span:not(.up):not(.down) { display: none; }
+  .fhud canvas { display: none; }
+  #hud { top: 6px; left: 6px; padding: 4px 8px; font-size: 12px; }
+  #llm-badge { top: 48px; left: 6px; font-size: 11px; padding: 3px 8px; }
+  #minimap { width: 100px; height: 100px; }
+  #overlay-bar { bottom: 118px; }
+  #overlay-legend { bottom: 154px; }
+  #inspector { z-index: 20; max-height: 62%; }
+  #war-strip { top: 40px; }
+  .toast { max-width: 240px; font-size: 12px; }
+}
+
 @media (max-width: 768px) {
   #app { grid-template-columns: 1fr; grid-template-rows: 1fr auto auto; grid-template-areas: "world" "feed" "timeline"; }
   #world-wrap { touch-action: none; }
@@ -319,9 +335,14 @@ button.ctl.active { background: var(--accent); color: var(--ink); border-color: 
   #chronicle-rail:not(.open) { display: none; }
   #chronicle-rail.open { position: fixed; inset: 0; width: 100%; z-index: 50; border-left: none; border-radius: 0; padding: 8px; }
   body.reading #chronicle-rail.open { width: 100%; }
-  #hud-factions { max-width: 92vw; font-size: 11px; top: 6px; gap: 4px; }
+  /* portrait: HUD sits left, compact banner chips (no names) sit right */
+  #hud-factions { left: auto; right: 6px; transform: none; justify-content: flex-end;
+    max-width: 58vw; font-size: 11px; top: 6px; gap: 3px; }
   #hud-factions .fhud canvas { display: none; }
-  #hud { top: 6px; left: 6px; padding: 4px 8px; font-size: 12px; }
+  .fhud > span:not(.up):not(.down) { display: none; }
+  #hud { top: 6px; left: 6px; padding: 4px 8px; font-size: 12px; max-width: 40vw; }
+  #llm-badge { top: 48px; left: 6px; font-size: 11px; padding: 3px 8px; }
+  #inspector { z-index: 20; }
   #war-strip { min-width: unset; width: 94vw; top: 40px; }
   .war-row { min-width: unset; font-size: 11px; }
   #inspector { right: 4px; left: 4px; width: auto; top: 6px; max-height: 70%; }

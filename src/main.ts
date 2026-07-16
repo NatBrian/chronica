@@ -28,6 +28,8 @@ const atlas: PawnAtlas = bakePawnAtlas();
 const idb = new IdbBackend();
 
 const params = new URLSearchParams(location.search);
+/** coarse-pointer device: hints and affordances speak touch, not keyboard */
+const isTouch = window.matchMedia('(pointer: coarse)').matches;
 const dev = params.get('dev');
 if (dev === 'seeds') {
   mountSeedBrowser();
@@ -66,6 +68,7 @@ function applyStaticIcons(): void {
   };
   set('#btn-pause', iconSvg('pause'));
   set('#btn-present', `Jump to present ${iconSvg('ff', 11)}`);
+  set('#btn-book', iconSvg('book'));
   set('#btn-director', iconSvg('eye'));
   set('#btn-timelapse', iconSvg('film'));
   set('#btn-export', iconSvg('down'));
@@ -543,6 +546,11 @@ function startWorld(boot: { seed?: number; resume?: SaveRecord; journal?: Journa
   // ---- controls ----
   const btnPause = document.getElementById('btn-pause')!;
   btnPause.addEventListener('click', () => { paused = !paused; btnPause.innerHTML = iconSvg(paused ? 'play' : 'pause'); applySpeed(); updateReadingMode(); });
+  // touch affordance for the history book (doc 14: keyboard is not mobile UI)
+  document.getElementById('btn-book')!.addEventListener('click', () => {
+    if (rail.classList.contains('open')) closeRail();
+    else openChronicle();
+  });
   document.querySelectorAll('button.speed').forEach(b => {
     b.addEventListener('click', () => {
       document.querySelectorAll('button.speed').forEach(x => x.classList.remove('active'));
@@ -2150,9 +2158,13 @@ ${parts.join('\n')}</body>`;
     document.getElementById('hint-x')!.addEventListener('click', () => { hintEl.style.display = 'none'; });
     setTimeout(() => { hintEl.style.display = 'none'; }, 12000);
   }
-  setTimeout(() => showHint('welcome', `${iconSvg('pause', 11)} Space pauses · 1/2/3 sets speed · drag to pan, wheel to zoom.`), 4000);
+  setTimeout(() => showHint('welcome', isTouch
+    ? `${iconSvg('pause', 11)} Tap the speed buttons below · drag to pan · pinch to zoom.`
+    : `${iconSvg('pause', 11)} Space pauses · 1/2/3 sets speed · drag to pan, wheel to zoom.`), 4000);
   setTimeout(() => showHint('feed', `${iconSvg('swords', 11)} When something happens, click it in the feed below to see WHY.`), 45000);
-  setTimeout(() => showHint('chronicle', `${iconSvg('book', 11)} Press C to read the history book your world is writing.`), 90000);
+  setTimeout(() => showHint('chronicle', isTouch
+    ? `${iconSvg('book', 11)} Tap the book button below to read the history your world is writing.`
+    : `${iconSvg('book', 11)} Press C to read the history book your world is writing.`), 90000);
   setTimeout(() => showHint('timeline', `${iconSvg('undo', 11)} Click anywhere on the timeline to travel back in time.`), 150000);
 
   // ---- render loop ----
